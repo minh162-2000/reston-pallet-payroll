@@ -1122,7 +1122,7 @@ async function processTracker() {
     const sheet    = wb.Sheets[wb.SheetNames[0]];
     // header: 1 = return as rows/arrays (no auto-detected headers)
     // defval: null = empty cells become null instead of being skipped
-    const rows     = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: false });
+    const rows     = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: true });
 
     // 2) Walk the rows, collecting worker+date → aggregated zone data
     const trackerMap  = parseTrackerRows(rows);
