@@ -458,14 +458,9 @@
           <select id="workers-week-select" onchange="loadWorkersTab()" style="width:auto; padding:7px 12px;">
             <option value="">— Select a week —</option>
           </select>
-          <label style="margin:0 0 0 8px; font-size:13px; font-weight:600; color:var(--gray-600);">Sort by:</label>
-          <select id="workers-sort" onchange="loadWorkersTab()" style="width:auto; padding:7px 12px;">
-            <option value="name_asc">Name (A → Z)</option>
-            <option value="name_desc">Name (Z → A)</option>
-            <option value="pay_desc">Total Pay (high → low)</option>
-            <option value="pay_asc">Total Pay (low → high)</option>
-            <option value="hours_desc">Hours (most → least)</option>
-            <option value="hours_asc">Hours (least → most)</option>
+          <label style="margin:0 0 0 8px; font-size:13px; font-weight:600; color:var(--gray-600);">Worker:</label>
+          <select id="workers-filter" onchange="loadWorkersTab()" style="width:auto; padding:7px 12px; min-width:180px;">
+            <option value="">— All workers —</option>
           </select>
           <!-- View toggle -->
           <div style="margin-left:auto; display:flex; gap:6px;">
@@ -1401,42 +1396,32 @@ async function loadWorkersTab() {
     sb.from('worker_week_summary').select('*').eq('week_id', weekId).order('worker_name')
   ]);
 
-  // ── SORT WORKERS BASED ON DROPDOWN SELECTION ─────────────
-  // We always group shifts by worker (so subtotals keep working).
-  // The sort setting only affects the ORDER of the worker groups.
-  const sortBy = document.getElementById('workers-sort').value || 'name_asc';
+  // ── POPULATE WORKER FILTER DROPDOWN ──────────────────────
+  // Only show workers who actually have shifts this week
+  const filterSel = document.getElementById('workers-filter');
+  const currentChoice = filterSel.value; // preserve the user's current selection
+  filterSel.innerHTML = '<option value="">— All workers —</option>';
+  (summaries || []).forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s.worker_name;
+    opt.textContent = s.worker_name;
+    filterSel.appendChild(opt);
+  });
+  // Restore the prior choice if it's still in this week's list
+  filterSel.value = currentChoice;
 
-  if (summaries) {
-    summaries.sort((a, b) => {
-      switch (sortBy) {
-        case 'name_desc':   return b.worker_name.localeCompare(a.worker_name);
-        case 'pay_desc':    return (b.total_pay || 0) - (a.total_pay || 0);
-        case 'pay_asc':     return (a.total_pay || 0) - (b.total_pay || 0);
-        case 'hours_desc':  return (b.net_hrs   || 0) - (a.net_hrs   || 0);
-        case 'hours_asc':   return (a.net_hrs   || 0) - (b.net_hrs   || 0);
-        case 'name_asc':
-        default:            return a.worker_name.localeCompare(b.worker_name);
-      }
-    });
-  }
-
-  // Reorder shifts to match the sorted worker order. Workers without a summary row
-  // go at the end, alphabetically.
-  if (shifts && summaries) {
-    const workerOrder = {};
-    summaries.forEach((s, idx) => { workerOrder[s.worker_name] = idx; });
-    shifts.sort((a, b) => {
-      const aIdx = workerOrder[a.worker_name] !== undefined ? workerOrder[a.worker_name] : 9999;
-      const bIdx = workerOrder[b.worker_name] !== undefined ? workerOrder[b.worker_name] : 9999;
-      if (aIdx !== bIdx) return aIdx - bIdx;
-      // Same worker — keep shifts in chronological order
-      return (a.shift_date || '').localeCompare(b.shift_date || '');
-    });
+  // ── APPLY FILTER — if a worker is selected, keep only their rows ───
+  const filterName = filterSel.value;
+  let filteredShifts    = shifts;
+  let filteredSummaries = summaries;
+  if (filterName) {
+    filteredShifts    = (shifts    || []).filter(s => s.worker_name === filterName);
+    filteredSummaries = (summaries || []).filter(s => s.worker_name === filterName);
   }
 
   // ── DETAIL VIEW: shift rows ──────────────────────────────
   shiftsTbody.innerHTML = '';
-  if (!shifts || shifts.length === 0) {
+  if (!filteredShifts || filteredShifts.length === 0) {
     shiftsTbody.innerHTML = '<tr><td colspan="14" style="padding:32px; text-align:center; color:var(--gray-400)">No shift data for this week</td></tr>';
   } else {
     let prevWorker = null;
@@ -1459,7 +1444,7 @@ async function loadWorkersTab() {
       return '<span style="background:#FFFDE7; color:#856a00; font-weight:700; padding:3px 8px; border-radius:5px; font-size:11px;">' + mins + '</span>';
     }
 
-    shifts.forEach((s, i) => {
+    filteredShifts.forEach((s, i) => {
       if (!avatarColorMap[s.worker_name]) {
         avatarColorMap[s.worker_name] = avatarColors[avatarIdx % avatarColors.length];
         avatarIdx++;
@@ -1471,7 +1456,7 @@ async function loadWorkersTab() {
 
       // Subtotal row before each new worker (except first)
       if (isNewWorker && prevWorker !== null) {
-        const prevSummary = (summaries || []).find(x => x.worker_name === prevWorker);
+        const prevSummary = (filteredSummaries || []).find(x => x.worker_name === prevWorker);
         const prevNetHrs  = prevSummary ? prevSummary.net_hrs    : 0;
         const prevPay     = prevSummary ? prevSummary.hourly_pay : 0;
         const subTr = document.createElement('tr');
@@ -1552,7 +1537,7 @@ async function loadWorkersTab() {
 
     // Last worker subtotal
     if (prevWorker) {
-      const prevSummary = (summaries || []).find(x => x.worker_name === prevWorker);
+      const prevSummary = (filteredSummaries || []).find(x => x.worker_name === prevWorker);
       const prevNetHrs  = prevSummary ? prevSummary.net_hrs    : 0;
       const prevPay     = prevSummary ? prevSummary.hourly_pay : 0;
       const subTr = document.createElement('tr');
@@ -1588,7 +1573,7 @@ async function loadWorkersTab() {
   // ── SUMMARY VIEW ─────────────────────────────────────────
   summaryTbody.innerHTML = '';
   let hasFlags = false;
-  (summaries || []).forEach(s => {
+  (filteredSummaries || []).forEach(s => {
     if (s.has_flag) hasFlags = true;
     const tr = document.createElement('tr');
     const worker = workersByName[s.worker_name] || {};
@@ -1604,7 +1589,7 @@ async function loadWorkersTab() {
     summaryTbody.appendChild(tr);
   });
 
-  if (!summaries || summaries.length === 0) {
+  if (!filteredSummaries || filteredSummaries.length === 0) {
     summaryTbody.innerHTML = '<tr><td colspan="7" style="padding:32px; text-align:center; color:var(--gray-400)">No data for this week</td></tr>';
   }
 
