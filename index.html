@@ -746,28 +746,20 @@ let detectedWeekEnd = null;
 let detectedWeekLabel = '';
 
 // ── WORKER RULES ────────────────────────────────────────────
-const WORKER_CONFIG = {
-  'Chris Gruchalla':   { role:'Forklift',  rate:24.50 },
-  'David S':           { role:'Grinding',  rate:17.60 },
-  'Eduardo Leal':      { role:'Misc',      rate:22.00 },
-  'Eric Yeboah':       { role:'Trim',      rate:17.60 },
-  'Gustavo Huerta':    { role:'Misc',      rate:17.60 },
-  'Harmanpreet Singh': { role:'Misc',      rate:17.60 },
-  'Jorge':             { role:'Misc',      rate:17.60 },
-  'Jose Reyna':        { role:'Misc',      rate:17.60 },
-  'Morgan':            { role:'Cutting',   rate:17.60 },
-  'Noe Israel':        { role:'Misc',      rate:17.75 },
-  'Pawel Skryzpecki':  { role:'Misc',      rate:24.50 },
-  'Rajesh Bishboi':    { role:'Misc',      rate:19.00 },
-  'Samuel Owusu':      { role:'Misc',      rate:17.60 },
-  'Slade':             { role:'Misc',      rate:18.00 },
-  'Stan':              { role:'Misc',      rate:19.00 },
-  'Thomas Adu':        { role:'Misc',      rate:17.60 },
-  'Vishaldeep Singh':  { role:'Misc',      rate:17.60 },
-  'Yair Moreno':       { role:'Misc',      rate:17.60 },
-  'Vinicio Burke':     { role:'Misc',      rate:17.60 },
-  'Dylan Scott Gill':  { role:'Misc',      rate:20.00 },
-};
+// Live cache of workers loaded from the Supabase `workers` table.
+// Populated by refreshWorkersCache() — called on login and before each payroll run.
+// Keyed by worker name → full worker row (rate, role, break_rule, no_7am_cap, saturday_rule, active).
+let workersByName = {};
+
+async function refreshWorkersCache() {
+  const { data, error } = await sb.from('workers').select('*');
+  if (error) {
+    console.error('Failed to load workers cache:', error);
+    return;
+  }
+  workersByName = {};
+  (data || []).forEach(w => { workersByName[w.name] = w; });
+}
 
 // ── INIT ────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', async () => {
@@ -788,11 +780,15 @@ function showLogin() {
   document.getElementById('submit-page').style.display = 'none';
 }
 
-function showApp(user) {
+async function showApp(user) {
   document.getElementById('login-page').style.display = 'none';
   document.getElementById('app').style.display = 'flex';
   document.getElementById('submit-page').style.display = 'none';
   document.getElementById('user-email').textContent = user.email;
+
+  // Load the workers cache first — everything else depends on it
+  await refreshWorkersCache();
+
   loadDashboard();
   loadWeekDropdowns();
   loadRates();
@@ -1040,6 +1036,9 @@ async function runPayroll() {
   sucEl.style.display = 'none';
 
   try {
+    // Refresh the workers cache from Supabase in case Staff changed since login
+    await refreshWorkersCache();
+
     const csv   = document.getElementById('csv-input').value.trim();
     const lines = csv.split('\n').filter(l => l.trim());
 
@@ -1216,21 +1215,29 @@ function processHourlyCSV(lines, weekStart, weekEnd) {
     if (!ciDate || !coDate || !ciHM || !coHM) continue;
     if (ciDate < weekStart || ciDate >= weekEnd) continue;
 
-    const config = WORKER_CONFIG[name] || { role: 'Unknown', rate: 0 };
+    // Look up this worker in the live cache (loaded from Supabase `workers` table).
+    // If they're not in the cache, we skip them — payroll only runs for workers
+    // that exist on the Staff page.
+    const worker = workersByName[name];
+    if (!worker) {
+      console.warn('Skipping unknown worker (not in Staff roster): ' + name);
+      continue;
+    }
+
     let inHM  = roundUp15(ciHM);
     let outHM = roundDown15(coHM);
 
-    const noSevenCap = ['Stan','Chris Gruchalla','Pawel Skryzpecki'].includes(name);
-    if (inHM.h < 7 && !noSevenCap) inHM = { h: 7, m: 0 };
+    // Apply the 7 AM start cap — unless this worker is exempt (no_7am_cap flag)
+    if (inHM.h < 7 && !worker.no_7am_cap) inHM = { h: 7, m: 0 };
 
     let inMin  = toMin(inHM);
     let outMin = toMin(outHM);
     if (coDate > ciDate || outMin < inMin) outMin += 1440;
 
     const rawHrs   = Math.max(0, (outMin - inMin) / 60);
-    const brkMins  = calcBreak(outHM, name, coDate);
+    const brkMins  = calcBreak(outHM, worker, coDate);
     const netHrs   = Math.max(0, rawHrs - brkMins / 60);
-    const totalPay = Math.round(netHrs * config.rate * 100) / 100;
+    const totalPay = Math.round(netHrs * worker.rate * 100) / 100;
 
     shifts.push({
       worker_name: name,
@@ -1243,7 +1250,7 @@ function processHourlyCSV(lines, weekStart, weekEnd) {
       raw_hrs:     Math.round(rawHrs * 100) / 100,
       break_mins:  brkMins,
       net_hrs:     Math.round(netHrs * 100) / 100,
-      hourly_rate: config.rate,
+      hourly_rate: worker.rate,
       total_pay:   totalPay
     });
   }
@@ -1251,20 +1258,36 @@ function processHourlyCSV(lines, weekStart, weekEnd) {
 }
 
 // ── BREAK CALCULATION ─────────────────────────────────────────
-function calcBreak(outHM, name, date) {
-  if (['Stan','Dylan Scott Gill'].includes(name)) return 0;
-  if (name === 'Slade') return 30;
-  const mins    = toMin(outHM);
-  const isNight = outHM.h < 7;
-  if (name === 'Chris Gruchalla' && date.getDay() === 6) return mins < 870 ? 0 : 30;
-  if (['Chris Gruchalla','Pawel Skryzpecki'].includes(name)) {
+// Reads the break_rule and saturday_rule fields from the worker object
+// (as stored in the Supabase `workers` table).
+function calcBreak(outHM, worker, date) {
+  const rule     = worker.break_rule || 'standard';
+  const saturday = worker.saturday_rule;
+  const mins     = toMin(outHM);
+  const isNight  = outHM.h < 7;
+
+  // Rule: never deduct any break
+  if (rule === 'no_break') return 0;
+
+  // Rule: always deduct a flat 30 min
+  if (rule === 'flat_30') return 30;
+
+  // Saturday-specific variation (currently only Chris Gruchalla)
+  if (saturday && date.getDay() === 6) return mins < 870 ? 0 : 30;
+
+  // Rule: extended — 30/60 instead of 30/60/90, plus 60 at night
+  if (rule === 'extended') {
     if (isNight) return 60;
     return mins <= 870 ? 30 : 60;
   }
-  if (name === 'Rajesh Bishboi') {
+
+  // Rule: standard progression capped at 45 min max
+  if (rule === 'capped_45') {
     const b = isNight ? 90 : (mins <= 870 ? 30 : mins <= 1110 ? 60 : 90);
     return Math.min(b, 45);
   }
+
+  // Default standard progression
   if (isNight)      return 90;
   if (mins <= 870)  return 30;
   if (mins <= 1110) return 60;
@@ -1440,8 +1463,8 @@ async function loadWorkersTab() {
         : '';
 
       const color  = avatarColorMap[s.worker_name];
-      const config = WORKER_CONFIG[s.worker_name] || {};
-      const role   = config.role || '';
+      const worker = workersByName[s.worker_name] || {};
+      const role   = worker.role || '';
 
       // Worker cell — show avatar + name + role badge on first row, empty on subsequent rows
       const workerCell = isNewWorker
@@ -1522,10 +1545,10 @@ async function loadWorkersTab() {
   (summaries || []).forEach(s => {
     if (s.has_flag) hasFlags = true;
     const tr = document.createElement('tr');
-    const config = WORKER_CONFIG[s.worker_name] || {};
+    const worker = workersByName[s.worker_name] || {};
     tr.innerHTML = `
       <td><strong>${s.worker_name}</strong></td>
-      <td>${config.role || 'Piece Rate'}</td>
+      <td>${worker.role || 'Piece Rate'}</td>
       <td class="td-hrs">${s.net_hrs > 0 ? s.net_hrs.toFixed(2) : '—'}</td>
       <td class="td-money">${s.hourly_pay > 0 ? fmtMoney(s.hourly_pay) : '—'}</td>
       <td style="color:var(--purple); font-weight:600;">${s.piece_pay > 0 ? fmtMoney(s.piece_pay) : '—'}</td>
@@ -1585,7 +1608,10 @@ async function saveShiftEdit(shiftId, field, value) {
     if (outMin <= inMin) outMin += 1440; // overnight
 
     const rawHrs   = Math.max(0, (outMin - inMin) / 60);
-    const brkMins  = calcBreak(outHM, shift.worker_name, new Date(shift.shift_date + 'T00:00:00'));
+    // calcBreak needs the worker's break_rule and saturday_rule from the cache.
+    // Fall back to an empty object (which defaults to 'standard' rule) if worker isn't found.
+    const worker   = workersByName[shift.worker_name] || {};
+    const brkMins  = calcBreak(outHM, worker, new Date(shift.shift_date + 'T00:00:00'));
     const netHrs   = Math.max(0, rawHrs - brkMins / 60);
     const totalPay = Math.round(netHrs * (shift.hourly_rate || 0) * 100) / 100;
 
@@ -1788,7 +1814,7 @@ async function deleteRate(id) {
 // ── PERFORMANCE ───────────────────────────────────────────────
 async function populateWorkerSelect() {
   const sel = document.getElementById('perf-worker-select');
-  Object.keys(WORKER_CONFIG).sort().forEach(name => {
+  Object.keys(workersByName).sort().forEach(name => {
     const opt = document.createElement('option');
     opt.value = name; opt.textContent = name;
     sel.appendChild(opt);
@@ -1867,8 +1893,13 @@ async function loadStaff() {
 
   if (!staff || staff.length === 0) {
     tbody.innerHTML = '<tr><td colspan="7" style="padding:32px; text-align:center; color:var(--gray-400)">No workers yet — click "+ Add Worker" to add one</td></tr>';
+    workersByName = {};
     return;
   }
+
+  // Keep the global cache in sync with what we just fetched
+  workersByName = {};
+  staff.forEach(w => { workersByName[w.name] = w; });
 
   // Friendly labels for the break_rule codes stored in the database
   const breakLabels = {
