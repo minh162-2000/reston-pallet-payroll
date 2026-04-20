@@ -1,0 +1,2641 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reston Pallet — Payroll</title>
+<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+  :root {
+    --navy: #1F3864;
+    --green: #1E5631;
+    --green-light: #E8F5E9;
+    --purple: #7B2D8B;
+    --purple-light: #F3E0FF;
+    --red: #C00000;
+    --red-light: #FFE0E0;
+    --amber: #F59E0B;
+    --amber-light: #FFFDE7;
+    --gray-50: #F8F9FA;
+    --gray-100: #F1F3F4;
+    --gray-200: #E8EAED;
+    --gray-400: #9AA0A6;
+    --gray-600: #5F6368;
+    --gray-800: #3C4043;
+    --white: #FFFFFF;
+    --sidebar-w: 220px;
+    --font: 'Segoe UI', system-ui, sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: var(--font); background: var(--gray-50); color: var(--gray-800); min-height: 100vh; }
+
+  /* ── LAYOUT ── */
+  #app { display: flex; min-height: 100vh; }
+  #sidebar {
+    width: var(--sidebar-w); background: var(--navy); color: #fff;
+    display: flex; flex-direction: column; position: fixed;
+    top: 0; left: 0; height: 100vh; z-index: 100;
+  }
+  #main { margin-left: var(--sidebar-w); flex: 1; display: flex; flex-direction: column; }
+
+  /* ── SIDEBAR ── */
+  .sidebar-logo {
+    padding: 20px 16px 16px;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+  }
+  .sidebar-logo h1 { font-size: 13px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: #fff; }
+  .sidebar-logo p  { font-size: 11px; color: rgba(255,255,255,0.5); margin-top: 2px; }
+
+  .nav-section { padding: 12px 0 4px; }
+  .nav-label { font-size: 10px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: rgba(255,255,255,0.4); padding: 0 16px 6px; }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 16px; cursor: pointer; font-size: 13px;
+    color: rgba(255,255,255,0.7); border-left: 3px solid transparent;
+    transition: all 0.15s;
+  }
+  .nav-item:hover { background: rgba(255,255,255,0.08); color: #fff; }
+  .nav-item.active { background: rgba(255,255,255,0.12); color: #fff; border-left-color: #4CAF50; }
+  .nav-item .icon { font-size: 16px; width: 20px; text-align: center; }
+
+  .sidebar-bottom {
+    margin-top: auto; padding: 16px;
+    border-top: 1px solid rgba(255,255,255,0.1);
+    font-size: 12px; color: rgba(255,255,255,0.5);
+  }
+  .logout-btn {
+    display: block; width: 100%; padding: 8px; margin-top: 8px;
+    background: rgba(255,255,255,0.1); border: none; color: rgba(255,255,255,0.8);
+    border-radius: 6px; cursor: pointer; font-size: 12px; font-family: var(--font);
+  }
+  .logout-btn:hover { background: rgba(255,255,255,0.2); }
+
+  /* ── TOPBAR ── */
+  #topbar {
+    background: var(--white); border-bottom: 1px solid var(--gray-200);
+    padding: 0 24px; height: 56px; display: flex; align-items: center;
+    justify-content: space-between; position: sticky; top: 0; z-index: 50;
+  }
+  #topbar h2 { font-size: 16px; font-weight: 600; color: var(--navy); }
+  .topbar-right { display: flex; align-items: center; gap: 12px; }
+  .badge { font-size: 11px; padding: 3px 10px; border-radius: 20px; font-weight: 600; }
+  .badge-green { background: var(--green-light); color: var(--green); }
+  .badge-red   { background: var(--red-light);   color: var(--red); }
+  .badge-amber { background: var(--amber-light);  color: #92400E; }
+
+  /* ── PAGE CONTENT ── */
+  #content { padding: 24px; flex: 1; }
+
+  /* ── CARDS ── */
+  .card {
+    background: var(--white); border-radius: 10px;
+    border: 1px solid var(--gray-200); padding: 20px;
+  }
+  .card-title { font-size: 13px; font-weight: 600; color: var(--gray-600); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .stat-card { background: var(--white); border-radius: 10px; border: 1px solid var(--gray-200); padding: 16px 20px; }
+  .stat-label { font-size: 12px; color: var(--gray-400); font-weight: 500; margin-bottom: 6px; }
+  .stat-value { font-size: 26px; font-weight: 700; color: var(--navy); }
+  .stat-sub   { font-size: 11px; color: var(--gray-400); margin-top: 4px; }
+
+  /* ── TABLES ── */
+  .table-wrap { overflow-x: auto; border-radius: 10px; border: 1px solid var(--gray-200); }
+  table { width: 100%; border-collapse: collapse; background: var(--white); font-size: 13px; }
+  thead th { background: var(--navy); color: #fff; padding: 11px 14px; text-align: left; font-size: 11px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; white-space: nowrap; }
+  tbody tr { border-bottom: 1px solid var(--gray-100); transition: background 0.1s; }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: var(--gray-50); }
+  tbody td { padding: 10px 14px; color: var(--gray-800); }
+  .td-money { font-weight: 600; color: var(--green); font-variant-numeric: tabular-nums; }
+  .td-hrs   { font-weight: 600; color: var(--navy); }
+  .td-flag  { font-size: 16px; text-align: center; }
+  .td-muted { color: var(--gray-400); font-style: italic; font-size: 12px; }
+
+  /* ── BUTTONS ── */
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 9px 18px; border-radius: 7px; font-size: 13px; font-weight: 600; cursor: pointer; border: none; font-family: var(--font); transition: all 0.15s; }
+  .btn-primary { background: var(--navy); color: #fff; }
+  .btn-primary:hover { background: #162a4e; }
+  .btn-green  { background: var(--green); color: #fff; }
+  .btn-green:hover { background: #155227; }
+  .btn-outline { background: transparent; color: var(--navy); border: 1px solid var(--gray-200); }
+  .btn-outline:hover { background: var(--gray-50); }
+  .btn-danger { background: var(--red); color: #fff; }
+  .btn-sm { padding: 5px 12px; font-size: 12px; }
+
+  /* ── FORMS ── */
+  .form-group { margin-bottom: 16px; }
+  label { display: block; font-size: 12px; font-weight: 600; color: var(--gray-600); margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.4px; }
+  input, select, textarea {
+    width: 100%; padding: 9px 12px; border: 1px solid var(--gray-200);
+    border-radius: 7px; font-size: 13px; font-family: var(--font);
+    background: var(--white); color: var(--gray-800);
+    transition: border-color 0.15s;
+  }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--navy); }
+  textarea { min-height: 120px; resize: vertical; }
+
+  /* ── ALERTS ── */
+  .alert { padding: 12px 16px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; display: flex; align-items: flex-start; gap: 10px; }
+  .alert-red    { background: var(--red-light);   border-left: 4px solid var(--red);   color: #7B0000; }
+  .alert-green  { background: var(--green-light);  border-left: 4px solid var(--green);  color: #1B5E20; }
+  .alert-amber  { background: var(--amber-light);  border-left: 4px solid var(--amber);  color: #78350F; }
+  .alert-navy   { background: #EBF3FF; border-left: 4px solid var(--navy); color: var(--navy); }
+
+  /* ── LOGIN PAGE ── */
+  #login-page {
+    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, var(--navy) 0%, #2d4e8a 100%);
+  }
+  .login-box { background: var(--white); border-radius: 14px; padding: 40px; width: 380px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
+  .login-logo { text-align: center; margin-bottom: 32px; }
+  .login-logo h1 { font-size: 20px; font-weight: 800; color: var(--navy); }
+  .login-logo p  { font-size: 12px; color: var(--gray-400); margin-top: 4px; }
+  .login-logo .icon { font-size: 40px; margin-bottom: 12px; }
+
+  /* ── MISC ── */
+  .page { display: none; }
+  .page.active { display: block; }
+  .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  .section-header h3 { font-size: 15px; font-weight: 700; color: var(--navy); }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+  .mt-16 { margin-top: 16px; }
+  .mt-24 { margin-top: 24px; }
+  .mb-16 { margin-bottom: 16px; }
+  .text-muted { color: var(--gray-400); font-size: 12px; }
+  .divider { border: none; border-top: 1px solid var(--gray-200); margin: 20px 0; }
+  .chip { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+  .chip-green  { background: var(--green-light);  color: var(--green); }
+  .chip-purple { background: var(--purple-light); color: var(--purple); }
+  .chip-red    { background: var(--red-light);    color: var(--red); }
+  .chip-amber  { background: var(--amber-light);  color: #92400E; }
+  .spinner { display: inline-block; width: 18px; height: 18px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .empty-state { text-align: center; padding: 48px 24px; color: var(--gray-400); }
+  .empty-state .icon { font-size: 40px; margin-bottom: 12px; }
+  .empty-state p { font-size: 14px; }
+
+  /* ── PERFORMANCE BARS ── */
+  .perf-bar-wrap { background: var(--gray-100); border-radius: 4px; height: 8px; flex: 1; }
+  .perf-bar { height: 8px; border-radius: 4px; background: var(--green); transition: width 0.5s; }
+
+  /* ── QR SUBMIT (public page) ── */
+  #submit-page {
+    min-height: 100vh; background: var(--gray-50);
+    display: flex; align-items: center; justify-content: center; padding: 24px;
+  }
+  .submit-box { background: var(--white); border-radius: 14px; padding: 32px; width: 100%; max-width: 420px; box-shadow: 0 4px 24px rgba(0,0,0,0.08); }
+  .submit-box h2 { font-size: 18px; font-weight: 700; color: var(--navy); margin-bottom: 4px; }
+  .submit-box .sub { font-size: 13px; color: var(--gray-400); margin-bottom: 24px; }
+
+  @media (max-width: 768px) {
+    #sidebar { transform: translateX(-100%); }
+    #main { margin-left: 0; }
+    .grid-2, .grid-3 { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════════════════════
+     LOGIN PAGE
+══════════════════════════════════════════════════════════ -->
+<div id="login-page">
+  <div class="login-box">
+    <div class="login-logo">
+      <div class="icon">🏭</div>
+      <h1>Reston Pallet</h1>
+      <p>Payroll Management System</p>
+    </div>
+    <div id="login-error" class="alert alert-red" style="display:none"></div>
+    <div class="form-group">
+      <label>Email</label>
+      <input type="email" id="login-email" placeholder="your@email.com" />
+    </div>
+    <div class="form-group">
+      <label>Password</label>
+      <input type="password" id="login-password" placeholder="••••••••" />
+    </div>
+    <button class="btn btn-primary" style="width:100%; justify-content:center; margin-top:8px;" onclick="login()">
+      <span id="login-btn-text">Sign In</span>
+    </button>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     WORKER SUBMIT PAGE (public — no login)
+══════════════════════════════════════════════════════════ -->
+<div id="submit-page" style="display:none">
+  <div class="submit-box">
+    <h2>📦 Production Entry</h2>
+    <p class="sub">Reston Pallet Solutions — Submit your production for today</p>
+    <div id="submit-success" class="alert alert-green" style="display:none">✅ Submitted successfully! You can close this page.</div>
+    <div id="submit-error" class="alert alert-red" style="display:none"></div>
+    <div class="form-group">
+      <label>Your Name</label>
+      <input type="text" id="sub-name" placeholder="Full name" />
+    </div>
+    <div class="form-group">
+      <label>BOL Number</label>
+      <input type="text" id="sub-bol" placeholder="e.g. 130841" />
+    </div>
+    <div class="form-group">
+      <label>Customer Name</label>
+      <input type="text" id="sub-customer" placeholder="e.g. CP Automation" />
+    </div>
+    <div class="form-group">
+      <label>Size</label>
+      <input type="text" id="sub-size" placeholder="e.g. 60x60" />
+    </div>
+    <div class="form-group">
+      <label>BOL Quantity</label>
+      <input type="number" id="sub-bol-qty" placeholder="Total pallets on BOL" min="1" />
+    </div>
+    <div class="form-group">
+      <label>Production Type</label>
+      <select id="sub-type">
+        <option value="solo">Solo</option>
+        <option value="team">Team</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>Quantity Built</label>
+      <input type="number" id="sub-qty" placeholder="How many did you build?" min="1" />
+    </div>
+    <div class="form-group">
+      <label>Work Date</label>
+      <input type="date" id="sub-date" />
+    </div>
+    <button class="btn btn-green" style="width:100%; justify-content:center; margin-top:8px;" onclick="submitProduction()">
+      <span id="submit-btn-text">Submit</span>
+    </button>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     MAIN APP
+══════════════════════════════════════════════════════════ -->
+<div id="app" style="display:none">
+
+  <!-- SIDEBAR -->
+  <nav id="sidebar">
+    <div class="sidebar-logo">
+      <h1>Reston Pallet</h1>
+      <p>Payroll System</p>
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-label">Overview</div>
+      <div class="nav-item active" onclick="nav('dashboard')">
+        <span class="icon">📊</span> Dashboard
+      </div>
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-label">Payroll</div>
+      <div class="nav-item" onclick="nav('run-payroll')">
+        <span class="icon">🚀</span> Run Payroll
+      </div>
+      <div class="nav-item" onclick="nav('workers')">
+        <span class="icon">👷</span> Hourly
+      </div>
+      <div class="nav-item" onclick="nav('history')">
+        <span class="icon">📁</span> Week History
+      </div>
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-label">Production</div>
+      <div class="nav-item" onclick="nav('submissions')">
+        <span class="icon">📦</span> Submissions
+      </div>
+      <div class="nav-item" onclick="nav('rates')">
+        <span class="icon">⚙️</span> Master Rates
+      </div>
+      <div class="nav-item" onclick="nav('staff')">
+        <span class="icon">🪪</span> Staff
+      </div>
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-label">Insights</div>
+      <div class="nav-item" onclick="nav('performance')">
+        <span class="icon">📈</span> Performance
+      </div>
+    </div>
+
+    <div class="sidebar-bottom">
+      <div id="user-email" style="font-size:11px; color:rgba(255,255,255,0.5); margin-bottom:4px;"></div>
+      <button class="logout-btn" onclick="logout()">Sign Out</button>
+    </div>
+  </nav>
+
+  <!-- MAIN -->
+  <div id="main">
+    <div id="topbar">
+      <h2 id="page-title">Dashboard</h2>
+      <div class="topbar-right">
+        <span id="topbar-week" class="badge badge-green"></span>
+      </div>
+    </div>
+
+    <div id="content">
+
+      <!-- ── DASHBOARD ── -->
+      <div id="page-dashboard" class="page active">
+        <div class="stat-grid" id="dash-stats">
+          <div class="stat-card"><div class="stat-label">Total Labor Cost</div><div class="stat-value" id="ds-total">—</div><div class="stat-sub">this week</div></div>
+          <div class="stat-card"><div class="stat-label">Hourly Pay</div><div class="stat-value" id="ds-hourly">—</div><div class="stat-sub">this week</div></div>
+          <div class="stat-card"><div class="stat-label">Piece Rate Pay</div><div class="stat-value" id="ds-piece">—</div><div class="stat-sub">this week</div></div>
+          <div class="stat-card"><div class="stat-label">Active Workers</div><div class="stat-value" id="ds-workers">—</div><div class="stat-sub">this week</div></div>
+          <div class="stat-card"><div class="stat-label">Flags</div><div class="stat-value" id="ds-flags" style="color:var(--red)">—</div><div class="stat-sub">need review</div></div>
+        </div>
+
+        <div class="grid-2">
+          <div>
+            <div class="section-header">
+              <h3>Worker Totals</h3>
+              <button class="btn btn-outline btn-sm" onclick="nav('workers')">View All</button>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Worker</th><th>Net Hrs</th><th>Total Pay</th><th>Flag</th></tr></thead>
+                <tbody id="dash-workers-table"><tr><td colspan="4" class="empty-state" style="padding:24px; text-align:center; color:var(--gray-400)">Run payroll to see data</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+          <div>
+            <div class="section-header">
+              <h3>Recent Submissions</h3>
+              <button class="btn btn-outline btn-sm" onclick="nav('submissions')">View All</button>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Worker</th><th>Customer</th><th>Qty</th><th>Date</th></tr></thead>
+                <tbody id="dash-submissions-table"><tr><td colspan="4" style="padding:24px; text-align:center; color:var(--gray-400)">No submissions yet</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── RUN PAYROLL ── -->
+      <div id="page-run-payroll" class="page">
+        <div class="grid-2" style="align-items:start">
+          <div>
+            <div class="card mb-16">
+              <div class="card-title">Step 1 — Homebase CSV</div>
+              <p class="text-muted" style="margin: 8px 0 12px">Export CSV from Homebase Timesheets, then drag the file below — or paste directly</p>
+
+              <!-- Drop zone -->
+              <div id="drop-zone" onclick="document.getElementById('csv-file').click()" style="
+                border: 2px dashed var(--gray-200); border-radius: 10px;
+                padding: 28px; text-align: center; cursor: pointer;
+                background: var(--gray-50); transition: all 0.2s; margin-bottom: 12px;">
+                <div style="font-size: 32px; margin-bottom: 8px;">📂</div>
+                <div style="font-size: 14px; font-weight: 600; color: var(--navy);" id="drop-label">Drop your CSV file here</div>
+                <div style="font-size: 12px; color: var(--gray-400); margin-top: 4px;">or click to browse</div>
+                <input type="file" id="csv-file" accept=".csv" style="display:none" onchange="handleFileSelect(event)" />
+              </div>
+
+              <!-- Divider -->
+              <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+                <div style="flex:1; height:1px; background:var(--gray-200)"></div>
+                <span style="font-size:11px; color:var(--gray-400); font-weight:600;">OR PASTE MANUALLY</span>
+                <div style="flex:1; height:1px; background:var(--gray-200)"></div>
+              </div>
+
+              <div class="form-group" style="margin:0">
+                <textarea id="csv-input" placeholder="Paste CSV here...&#10;&#10;Name,Clock in date,Clock in time,Clock out date,Clock out time..." style="min-height:80px;"></textarea>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-title">Step 2 — Confirm & Run</div>
+              <div id="week-detected" class="alert alert-navy" style="display:none; margin-top:12px"></div>
+              <div id="run-error" class="alert alert-red" style="display:none; margin-top:12px"></div>
+              <div id="run-success" class="alert alert-green" style="display:none; margin-top:12px"></div>
+              <div style="display:flex; gap:10px; margin-top:16px;">
+                <button class="btn btn-outline" onclick="detectWeek()">Detect Week</button>
+                <button class="btn btn-green" id="run-btn" onclick="runPayroll()" disabled>
+                  <span id="run-btn-text">🚀 Run Payroll</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="card mt-16">
+              <div class="card-title">Step 3 — Tracker File <span style="font-weight:400; text-transform:none; letter-spacing:0; color:var(--gray-400); font-size:11px;">(optional, runs independently)</span></div>
+              <p class="text-muted" style="margin: 8px 0 12px">Upload the tracker .xlsx to add Floor/Zone times and late-to-station flags on the Hourly page.</p>
+
+              <!-- Drop zone for tracker xlsx -->
+              <div id="tracker-drop-zone" onclick="document.getElementById('tracker-file').click()" style="
+                border: 2px dashed var(--gray-200); border-radius: 10px;
+                padding: 24px; text-align: center; cursor: pointer;
+                background: var(--gray-50); transition: all 0.2s; margin-bottom: 12px;">
+                <div style="font-size: 28px; margin-bottom: 6px;">📡</div>
+                <div style="font-size: 13px; font-weight: 600; color: var(--navy);" id="tracker-drop-label">Drop tracker .xlsx file here</div>
+                <div style="font-size: 11px; color: var(--gray-400); margin-top: 3px;">or click to browse</div>
+                <input type="file" id="tracker-file" accept=".xlsx,.xls" style="display:none" onchange="handleTrackerFileSelect(event)" />
+              </div>
+
+              <div id="tracker-info"    class="alert alert-navy"  style="display:none; margin-top:8px"></div>
+              <div id="tracker-error"   class="alert alert-red"   style="display:none; margin-top:8px"></div>
+              <div id="tracker-success" class="alert alert-green" style="display:none; margin-top:8px"></div>
+
+              <button class="btn btn-primary" id="tracker-btn" onclick="processTracker()" disabled style="margin-top:12px;">
+                <span id="tracker-btn-text">Process Tracker File</span>
+              </button>
+            </div>
+          </div>
+          <div>
+            <div class="card">
+              <div class="card-title">Payroll Rules Applied</div>
+              <div style="margin-top:12px; font-size:13px; display:flex; flex-direction:column; gap:10px;">
+                <div style="padding:10px; background:var(--gray-50); border-radius:8px;">
+                  <strong>Break Deductions</strong>
+                  <div class="text-muted" style="margin-top:4px">≤4.5 hrs: 30 min &nbsp;|&nbsp; ≤6 hrs: 60 min &nbsp;|&nbsp; 6+ hrs: 90 min</div>
+                </div>
+                <div style="padding:10px; background:var(--gray-50); border-radius:8px;">
+                  <strong>Worker Exceptions</strong>
+                  <div class="text-muted" style="margin-top:4px">Stan, Dylan: no break &nbsp;|&nbsp; Slade: 30 min flat &nbsp;|&nbsp; Rajesh: max 45 min</div>
+                </div>
+                <div style="padding:10px; background:var(--gray-50); border-radius:8px;">
+                  <strong>Clock Rounding</strong>
+                  <div class="text-muted" style="margin-top:4px">In: ceiling 15 min &nbsp;|&nbsp; Out: floor 15 min &nbsp;|&nbsp; Start cap: 7:00am (except Stan, Chris, Pawel)</div>
+                </div>
+                <div style="padding:10px; background:var(--gray-50); border-radius:8px;">
+                  <strong>Piece Rate</strong>
+                  <div class="text-muted" style="margin-top:4px">BOL validation by BOL + Size &nbsp;|&nbsp; Late flag if submitted 7+ days late</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── WORKERS ── -->
+      <div id="page-workers" class="page">
+        <!-- Controls row -->
+        <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px; flex-wrap:wrap;">
+          <label style="margin:0; font-size:13px; font-weight:600; color:var(--gray-600);">Week:</label>
+          <select id="workers-week-select" onchange="loadWorkersTab()" style="width:auto; padding:7px 12px;">
+            <option value="">— Select a week —</option>
+          </select>
+          <label style="margin:0 0 0 8px; font-size:13px; font-weight:600; color:var(--gray-600);">Worker:</label>
+          <select id="workers-filter" onchange="loadWorkersTab()" style="width:auto; padding:7px 12px; min-width:180px;">
+            <option value="">— All workers —</option>
+          </select>
+          <!-- View toggle -->
+          <div style="margin-left:auto; display:flex; gap:6px;">
+            <button id="tab-detail"  class="btn btn-primary btn-sm" onclick="setWorkersView('detail')">📋 Shift Detail</button>
+            <button id="tab-summary" class="btn btn-outline btn-sm" onclick="setWorkersView('summary')">📊 Summary</button>
+          </div>
+        </div>
+
+        <!-- DETAIL VIEW (default) — one row per shift like the screenshot -->
+        <div id="workers-detail-view">
+          <div class="table-wrap">
+            <table id="shifts-table-el" style="font-size:12px; border-collapse:collapse; width:100%;">
+              <thead>
+                <tr>
+                  <th style="width:180px; background:#1F3864; color:#fff; padding:10px 14px; text-align:left; font-size:11px; font-weight:600; letter-spacing:0.5px; text-transform:uppercase;">Worker</th>
+                  <th style="background:#1F3864; color:#fff; padding:10px 14px; text-align:left; font-size:11px; font-weight:600; letter-spacing:0.5px; text-transform:uppercase;">Date</th>
+                  <th style="background:#1F3864; color:#fff; padding:10px 14px; text-align:left; font-size:11px; font-weight:600; letter-spacing:0.5px; text-transform:uppercase;">Day</th>
+                  <th style="background:#1F3864; color:#fff; padding:10px 14px; text-align:left; font-size:11px; font-weight:600; letter-spacing:0.5px; text-transform:uppercase;">Clock-In</th>
+                  <th style="background:#1F3864; color:#fff; padding:10px 14px; text-align:left; font-size:11px; font-weight:600; letter-spacing:0.5px; text-transform:uppercase;">Clock-Out</th>
+                  <th style="background:#1F3864; color:#7fa0cc; padding:10px 14px; text-align:left; font-size:11px; font-weight:600; letter-spacing:0.5px; text-transform:uppercase;">Actual In</th>
+                  <th style="background:#1F3864; color:#7fa0cc; padding:10px 14px; text-align:left; font-size:11px; font-weight:600; letter-spacing:0.5px; text-transform:uppercase;">Actual Out</th>
+                  <th style="background:#1F3864; color:#fff; padding:10px 14px; text-align:left; font-size:11px; font-weight:600; letter-spacing:0.5px; text-transform:uppercase;">Raw Hrs</th>
+                  <th style="background:#1F3864; color:#fff; padding:10px 14px; text-align:left; font-size:11px; font-weight:600; letter-spacing:0.5px; text-transform:uppercase;">Break</th>
+                  <th style="background:#1F3864; color:#fff; padding:10px 14px; text-align:left; font-size:11px; font-weight:600; letter-spacing:0.5px; text-transform:uppercase;">Net Hrs</th>
+                  <th style="background:#1F3864; color:#fff; padding:10px 14px; text-align:left; font-size:11px; font-weight:600; letter-spacing:0.5px; text-transform:uppercase;">Wk Total</th>
+                  <th style="background:#1F3864; color:#fff; padding:10px 14px; text-align:left; font-size:11px; font-weight:600; letter-spacing:0.5px; text-transform:uppercase;">Rate</th>
+                  <th style="background:#1F3864; color:#fff; padding:10px 14px; text-align:left; font-size:11px; font-weight:600; letter-spacing:0.5px; text-transform:uppercase;">Total Pay</th>
+                </tr>
+              </thead>
+              <tbody id="shifts-table">
+                <tr><td colspan="14" style="padding:32px; text-align:center; color:var(--gray-400)">Select a week above</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- SUMMARY VIEW -->
+        <div id="workers-summary-view" style="display:none;">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Worker</th><th>Role</th><th>Net Hrs</th>
+                  <th>Hourly Pay</th><th>Piece Rate Pay</th><th>Combined Total</th><th>Flag</th>
+                </tr>
+              </thead>
+              <tbody id="workers-table">
+                <tr><td colspan="7" style="padding:32px; text-align:center; color:var(--gray-400)">Select a week above</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="flags-section" style="display:none; margin-top:24px;">
+          <div class="section-header">
+            <h3 style="color:var(--red)">🚩 Flags — Review Required</h3>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Worker</th><th>Date</th><th>BOL</th><th>Customer | Size | Type</th><th>Qty</th><th>Issue</th></tr></thead>
+              <tbody id="flags-table"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── WEEK HISTORY ── -->
+      <div id="page-history" class="page">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Week</th><th>Status</th><th>Workers</th><th>Total Hours</th><th>Hourly Pay</th><th>Piece Pay</th><th>Total Pay</th><th></th></tr></thead>
+            <tbody id="history-table">
+              <tr><td colspan="8" style="padding:32px; text-align:center; color:var(--gray-400)">No weeks processed yet</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ── SUBMISSIONS ── -->
+      <div id="page-submissions" class="page">
+        <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px; flex-wrap:wrap;">
+          <input type="text" id="sub-search" placeholder="Search worker or BOL..." style="width:220px;" oninput="filterSubmissions()" />
+          <select id="sub-filter-week" onchange="filterSubmissions()" style="width:180px;">
+            <option value="">All weeks</option>
+          </select>
+          <div style="margin-left:auto;">
+            <button class="btn btn-outline btn-sm" onclick="nav('submit')">+ Add Manual Entry</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Worker</th><th>Date</th><th>BOL</th><th>Customer</th><th>Size | Type</th><th>Qty</th><th>BOL Qty</th><th>Rate</th><th>Earnings</th><th>Flag</th></tr></thead>
+            <tbody id="submissions-table">
+              <tr><td colspan="10" style="padding:32px; text-align:center; color:var(--gray-400)">No submissions yet</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ── MASTER RATES ── -->
+      <div id="page-rates" class="page">
+        <div class="grid-2" style="align-items:start">
+          <div>
+            <div class="section-header">
+              <h3>Current Rates</h3>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Customer</th><th>Type</th><th>Size</th><th>Rate</th><th></th></tr></thead>
+                <tbody id="rates-table">
+                  <tr><td colspan="5" style="padding:32px; text-align:center; color:var(--gray-400)">No rates yet</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div>
+            <div class="card">
+              <div class="card-title">Add New Rate</div>
+              <div id="rate-success" class="alert alert-green" style="display:none; margin-top:12px"></div>
+              <div id="rate-error" class="alert alert-red" style="display:none; margin-top:12px"></div>
+              <div class="form-group mt-16">
+                <label>Customer Name</label>
+                <input type="text" id="rate-customer" placeholder="e.g. CP Automation" />
+              </div>
+              <div class="form-group">
+                <label>Type</label>
+                <select id="rate-type">
+                  <option value="solo">Solo</option>
+                  <option value="team">Team</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Size</label>
+                <input type="text" id="rate-size" placeholder="e.g. 60x60" />
+              </div>
+              <div class="form-group">
+                <label>Rate ($ per unit)</label>
+                <input type="number" id="rate-value" placeholder="e.g. 1.39" step="0.01" min="0" />
+              </div>
+              <button class="btn btn-green" onclick="addRate()">Add Rate</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── STAFF ── -->
+      <div id="page-staff" class="page">
+        <div class="grid-2" style="align-items:start">
+          <!-- LEFT: staff roster table -->
+          <div>
+            <div class="section-header">
+              <h3>Staff Roster</h3>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Role</th>
+                    <th>Rate</th>
+                    <th>Break Rule</th>
+                    <th>Tracker ID</th>
+                    <th>Early Start?</th>
+                    <th>Status</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="staff-table">
+                  <tr><td colspan="8" style="padding:32px; text-align:center; color:var(--gray-400)">Loading...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- RIGHT: Add worker form -->
+          <div>
+            <div class="card">
+              <div class="card-title" id="staff-form-title">Add New Worker</div>
+              <div id="staff-success" class="alert alert-green" style="display:none; margin-top:12px"></div>
+              <div id="staff-error"   class="alert alert-red"   style="display:none; margin-top:12px"></div>
+
+              <div class="form-group mt-16">
+                <label>Full Name *</label>
+                <input type="text" id="staff-name" placeholder="e.g. John Smith" />
+                <div class="text-muted" style="margin-top:4px">Must match exactly how it appears in Homebase CSV</div>
+              </div>
+
+              <div class="form-group">
+                <label>Role</label>
+                <input type="text" id="staff-role" placeholder="e.g. Forklift, Cutting, Misc" value="Misc" />
+              </div>
+
+              <div class="form-group">
+                <label>Hourly Rate *</label>
+                <input type="number" id="staff-rate" placeholder="e.g. 17.60" step="0.01" min="0" />
+              </div>
+
+              <div class="form-group">
+                <label>Break Rule</label>
+                <select id="staff-break-rule">
+                  <option value="standard">Standard (30 / 60 / 90 min)</option>
+                  <option value="no_break">No break (e.g. Stan, Dylan)</option>
+                  <option value="flat_30">Flat 30 min always (e.g. Slade)</option>
+                  <option value="extended">Extended 30 / 60 (e.g. Chris, Pawel)</option>
+                  <option value="capped_45">Capped at 45 min (e.g. Rajesh)</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label>Tracker ID</label>
+                <input type="text" id="staff-tracker-id" placeholder="e.g. Eric, Noe 34d9, Harman 03de" />
+                <div class="text-muted" style="margin-top:4px">The name that appears in your tracker xlsx file. Leave blank if this worker doesn't have a beacon.</div>
+              </div>
+
+              <div class="form-group">
+                <label style="display:flex; align-items:center; gap:8px; text-transform:none; letter-spacing:0; font-size:13px;">
+                  <input type="checkbox" id="staff-is-tracked" style="width:auto; margin:0;" checked />
+                  <span>This worker is tracked by beacon</span>
+                </label>
+                <div class="text-muted" style="margin-top:4px; margin-left:24px;">Uncheck for workers who don't use the tracker (Chris, Stan, Slade, etc.)</div>
+              </div>
+
+              <div class="form-group">
+                <label style="display:flex; align-items:center; gap:8px; text-transform:none; letter-spacing:0; font-size:13px;">
+                  <input type="checkbox" id="staff-no-7am" style="width:auto; margin:0;" />
+                  <span>Exempt from 7 AM start cap</span>
+                </label>
+                <div class="text-muted" style="margin-top:4px; margin-left:24px;">Check if this worker legitimately starts before 7 AM</div>
+              </div>
+
+              <div class="form-group">
+                <label style="display:flex; align-items:center; gap:8px; text-transform:none; letter-spacing:0; font-size:13px;">
+                  <input type="checkbox" id="staff-saturday" style="width:auto; margin:0;" />
+                  <span>Saturday rule applies</span>
+                </label>
+                <div class="text-muted" style="margin-top:4px; margin-left:24px;">Chris Gruchalla's special Saturday break logic</div>
+              </div>
+
+              <div style="display:flex; gap:8px;">
+                <button class="btn btn-green" id="staff-save-btn" onclick="saveStaff()">Save Worker</button>
+                <button class="btn btn-outline" id="staff-cancel-btn" onclick="resetStaffForm()" style="display:none;">Cancel</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── PERFORMANCE ── -->
+      <div id="page-performance" class="page">
+        <div style="display:flex; align-items:center; gap:12px; margin-bottom:20px;">
+          <label style="margin:0; font-size:13px; font-weight:600; color:var(--gray-600)">Worker:</label>
+          <select id="perf-worker-select" onchange="loadPerformance()" style="width:220px;">
+            <option value="">— All Workers —</option>
+          </select>
+        </div>
+
+        <div class="stat-grid" id="perf-stats">
+          <div class="stat-card"><div class="stat-label">Avg Hours/Week</div><div class="stat-value" id="ps-hrs">—</div></div>
+          <div class="stat-card"><div class="stat-label">Total Pieces Built</div><div class="stat-value" id="ps-pieces">—</div></div>
+          <div class="stat-card"><div class="stat-label">Total Earnings</div><div class="stat-value" id="ps-earnings">—</div></div>
+          <div class="stat-card"><div class="stat-label">Late Clock-ins</div><div class="stat-value" id="ps-late" style="color:var(--amber)">—</div></div>
+        </div>
+
+        <div class="grid-2" style="margin-top:8px;">
+          <div>
+            <div class="section-header"><h3>Hours by Week</h3></div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Week</th><th>Net Hrs</th><th>Late Days</th><th>Hourly Pay</th></tr></thead>
+                <tbody id="perf-hours-table"><tr><td colspan="4" style="padding:24px; text-align:center; color:var(--gray-400)">Select a worker</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+          <div>
+            <div class="section-header"><h3>Piece Rate by Week</h3></div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Week</th><th>Pieces</th><th>Earnings</th></tr></thead>
+                <tbody id="perf-piece-table"><tr><td colspan="3" style="padding:24px; text-align:center; color:var(--gray-400)">Select a worker</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     JAVASCRIPT
+══════════════════════════════════════════════════════════ -->
+<script>
+const SUPABASE_URL = 'https://scovtwktgnxbtfsvfayw.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNjb3Z0d2t0Z254YnRmc3ZmYXl3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzOTUwNDQsImV4cCI6MjA5MTk3MTA0NH0.P-nChMXtlZhK9jnTbqgdYZttDjdppnpRgzkMDJWdiiI';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+let currentWeekId = null;
+let allSubmissions = [];
+let detectedWeekStart = null;
+let detectedWeekEnd = null;
+let detectedWeekLabel = '';
+
+// ── WORKER RULES ────────────────────────────────────────────
+// Live cache of workers loaded from the Supabase `workers` table.
+// Populated by refreshWorkersCache() — called on login and before each payroll run.
+// Keyed by worker name → full worker row (rate, role, break_rule, no_7am_cap, saturday_rule, active).
+let workersByName = {};
+
+async function refreshWorkersCache() {
+  const { data, error } = await sb.from('workers').select('*');
+  if (error) {
+    console.error('Failed to load workers cache:', error);
+    return;
+  }
+  workersByName = {};
+  (data || []).forEach(w => { workersByName[w.name] = w; });
+}
+
+// ── INIT ────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', async () => {
+  // Check if this is the worker submit page (?submit)
+  if (window.location.search.includes('submit')) {
+    showSubmitPage();
+    return;
+  }
+  // Check existing session
+  const { data: { session } } = await sb.auth.getSession();
+  if (session) showApp(session.user);
+  else showLogin();
+});
+
+function showLogin() {
+  document.getElementById('login-page').style.display = 'flex';
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('submit-page').style.display = 'none';
+}
+
+async function showApp(user) {
+  document.getElementById('login-page').style.display = 'none';
+  document.getElementById('app').style.display = 'flex';
+  document.getElementById('submit-page').style.display = 'none';
+  document.getElementById('user-email').textContent = user.email;
+
+  // Load the workers cache first — everything else depends on it
+  await refreshWorkersCache();
+
+  loadDashboard();
+  loadWeekDropdowns();
+  loadRates();
+  loadSubmissions();
+  populateWorkerSelect();
+}
+
+function showSubmitPage() {
+  document.getElementById('login-page').style.display = 'none';
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('submit-page').style.display = 'flex';
+  // Set today as default date
+  document.getElementById('sub-date').value = new Date().toISOString().split('T')[0];
+  // Pre-fill from URL params (QR code)
+  const p = new URLSearchParams(window.location.search);
+  if (p.get('bol'))      document.getElementById('sub-bol').value      = p.get('bol');
+  if (p.get('customer')) document.getElementById('sub-customer').value = p.get('customer');
+  if (p.get('size'))     document.getElementById('sub-size').value     = p.get('size');
+  if (p.get('bol_qty'))  document.getElementById('sub-bol-qty').value  = p.get('bol_qty');
+}
+
+// ── AUTH ─────────────────────────────────────────────────────
+async function login() {
+  const email    = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value;
+  const errEl    = document.getElementById('login-error');
+  const btnText  = document.getElementById('login-btn-text');
+
+  btnText.innerHTML = '<div class="spinner"></div>';
+  errEl.style.display = 'none';
+
+  const { data, error } = await sb.auth.signInWithPassword({ email, password });
+  if (error) {
+    errEl.textContent = error.message;
+    errEl.style.display = 'flex';
+    btnText.textContent = 'Sign In';
+  } else {
+    showApp(data.user);
+  }
+}
+
+async function logout() {
+  await sb.auth.signOut();
+  showLogin();
+}
+
+document.getElementById('login-password').addEventListener('keydown', e => {
+  if (e.key === 'Enter') login();
+});
+
+// ── NAVIGATION ───────────────────────────────────────────────
+function nav(page) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+
+  const pageEl = document.getElementById('page-' + page);
+  if (pageEl) pageEl.classList.add('active');
+
+  const titles = {
+    dashboard: 'Dashboard', 'run-payroll': 'Run Payroll',
+    workers: 'Hourly', history: 'Week History',
+    submissions: 'Submissions', rates: 'Master Rates',
+    performance: 'Performance', staff: 'Staff'
+  };
+  document.getElementById('page-title').textContent = titles[page] || page;
+
+  // Find and activate matching nav item
+  document.querySelectorAll('.nav-item').forEach(item => {
+    if (item.textContent.trim().toLowerCase().includes(
+      page.replace('-',' ').toLowerCase().split(' ')[0]
+    )) item.classList.add('active');
+  });
+
+  if (page === 'history')     loadHistory();
+  if (page === 'workers')     loadWorkersTab();
+  if (page === 'submissions') loadSubmissions();
+  if (page === 'performance') loadPerformance();
+  if (page === 'staff')       loadStaff();
+}
+
+// ── DASHBOARD ────────────────────────────────────────────────
+async function loadDashboard() {
+  // Get latest week
+  const { data: weeks } = await sb.from('week_periods')
+    .select('*').order('week_start', { ascending: false }).limit(1);
+
+  if (!weeks || weeks.length === 0) return;
+  const week = weeks[0];
+  currentWeekId = week.id;
+  document.getElementById('topbar-week').textContent = week.label;
+
+  // Get worker summaries for this week
+  const { data: summaries } = await sb.from('worker_week_summary')
+    .select('*').eq('week_id', week.id).order('total_pay', { ascending: false });
+
+  if (!summaries) return;
+
+  let totalHourly = 0, totalPiece = 0, flagCount = 0;
+  const tbody = document.getElementById('dash-workers-table');
+  tbody.innerHTML = '';
+
+  summaries.forEach(s => {
+    totalHourly += s.hourly_pay || 0;
+    totalPiece  += s.piece_pay  || 0;
+    if (s.has_flag) flagCount++;
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><strong>${s.worker_name}</strong></td>
+      <td class="td-hrs">${(s.net_hrs || 0).toFixed(2)}</td>
+      <td class="td-money">${fmtMoney(s.total_pay)}</td>
+      <td class="td-flag">${s.has_flag ? '🚩' : ''}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  document.getElementById('ds-total').textContent   = fmtMoney(totalHourly + totalPiece);
+  document.getElementById('ds-hourly').textContent  = fmtMoney(totalHourly);
+  document.getElementById('ds-piece').textContent   = fmtMoney(totalPiece);
+  document.getElementById('ds-workers').textContent = summaries.length;
+  document.getElementById('ds-flags').textContent   = flagCount;
+
+  // Recent submissions
+  const { data: subs } = await sb.from('piece_submissions')
+    .select('*').order('submitted_at', { ascending: false }).limit(8);
+
+  const stbody = document.getElementById('dash-submissions-table');
+  stbody.innerHTML = '';
+  if (subs && subs.length > 0) {
+    subs.forEach(s => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${s.worker_name}</td>
+        <td>${s.customer_name}</td>
+        <td>${s.qty}</td>
+        <td class="td-muted">${new Date(s.work_date).toLocaleDateString('en-US', {month:'short', day:'numeric'})}</td>
+      `;
+      stbody.appendChild(tr);
+    });
+  }
+}
+
+// ── DETECT WEEK FROM CSV ──────────────────────────────────────
+// ── DRAG AND DROP / FILE SELECT ──────────────────────────────
+function handleFileSelect(event) {
+  const file = event.target.files[0];
+  if (file) loadCSVFile(file);
+}
+
+function loadCSVFile(file) {
+  if (!file.name.endsWith('.csv') && file.type !== 'text/csv') {
+    alert('Please select a CSV file.');
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    document.getElementById('csv-input').value = e.target.result;
+    document.getElementById('drop-label').textContent = '✅ ' + file.name + ' loaded';
+    document.getElementById('drop-zone').style.borderColor = 'var(--green)';
+    document.getElementById('drop-zone').style.background = 'var(--green-light)';
+    detectWeek();
+  };
+  reader.readAsText(file);
+}
+
+// Drag and drop events
+document.addEventListener('DOMContentLoaded', function() {
+  const zone = document.getElementById('drop-zone');
+  if (!zone) return;
+
+  zone.addEventListener('dragover', function(e) {
+    e.preventDefault();
+    zone.style.borderColor = 'var(--navy)';
+    zone.style.background = '#EBF3FF';
+  });
+
+  zone.addEventListener('dragleave', function() {
+    zone.style.borderColor = 'var(--gray-200)';
+    zone.style.background = 'var(--gray-50)';
+  });
+
+  zone.addEventListener('drop', function(e) {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (file) loadCSVFile(file);
+  });
+});
+
+// ── TRACKER FILE HANDLERS ─────────────────────────────────────
+// Stores the selected tracker file so processTracker() can access it
+let trackerFile = null;
+
+function handleTrackerFileSelect(event) {
+  const file = event.target.files[0];
+  if (file) loadTrackerFile(file);
+}
+
+function loadTrackerFile(file) {
+  // Basic extension check — xlsx or xls only
+  if (!/\.xls[x]?$/i.test(file.name)) {
+    alert('Please select an Excel file (.xlsx or .xls).');
+    return;
+  }
+  trackerFile = file;
+
+  // Update the drop zone label so it's obvious a file is loaded
+  document.getElementById('tracker-drop-label').textContent = '✅ ' + file.name + ' loaded';
+  document.getElementById('tracker-drop-zone').style.borderColor = 'var(--green)';
+  document.getElementById('tracker-drop-zone').style.background  = 'var(--green-light)';
+
+  // Enable the Process button
+  document.getElementById('tracker-btn').disabled = false;
+
+  // Clear any previous result messages
+  document.getElementById('tracker-info').style.display    = 'none';
+  document.getElementById('tracker-error').style.display   = 'none';
+  document.getElementById('tracker-success').style.display = 'none';
+}
+
+// Register drag-and-drop for the tracker zone (runs after DOM loads)
+document.addEventListener('DOMContentLoaded', function() {
+  const zone = document.getElementById('tracker-drop-zone');
+  if (!zone) return;
+
+  zone.addEventListener('dragover', function(e) {
+    e.preventDefault();
+    zone.style.borderColor = 'var(--navy)';
+    zone.style.background  = '#EBF3FF';
+  });
+
+  zone.addEventListener('dragleave', function() {
+    // Keep green styling if a file is already loaded, else revert to gray
+    if (trackerFile) {
+      zone.style.borderColor = 'var(--green)';
+      zone.style.background  = 'var(--green-light)';
+    } else {
+      zone.style.borderColor = 'var(--gray-200)';
+      zone.style.background  = 'var(--gray-50)';
+    }
+  });
+
+  zone.addEventListener('drop', function(e) {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (file) loadTrackerFile(file);
+  });
+});
+
+// ── TRACKER THRESHOLDS (match the Google Apps Script) ────────
+// 7 AM is the "expected shift start" baseline.
+// ±10 min = on time (🟢), 11-30 min = yellow (🟡), >30 min = red (🔴)
+const TRACKER_SHIFT_START_HOUR = 7;
+const TRACKER_LATE_YELLOW      = 10;
+const TRACKER_LATE_RED         = 30;
+const TRACKER_EARLY_YELLOW     = -10;
+const TRACKER_EARLY_RED        = -30;
+
+// Main entry point — called when user clicks "Process Tracker File"
+async function processTracker() {
+  const infoEl = document.getElementById('tracker-info');
+  const errEl  = document.getElementById('tracker-error');
+  const sucEl  = document.getElementById('tracker-success');
+  const btn    = document.getElementById('tracker-btn');
+  const btnTxt = document.getElementById('tracker-btn-text');
+  infoEl.style.display = 'none';
+  errEl.style.display  = 'none';
+  sucEl.style.display  = 'none';
+
+  if (!trackerFile) {
+    errEl.textContent = 'Please drop a tracker file first.';
+    errEl.style.display = 'flex';
+    return;
+  }
+  if (typeof XLSX === 'undefined') {
+    errEl.textContent = 'Excel reader library did not load. Check your internet connection and reload the page.';
+    errEl.style.display = 'flex';
+    return;
+  }
+
+  btn.disabled = true;
+  btnTxt.innerHTML = '<div class="spinner"></div> Processing...';
+
+  try {
+    // 1) Read the xlsx file into a 2D array of cell values
+    const arrayBuf = await trackerFile.arrayBuffer();
+    const wb       = XLSX.read(arrayBuf, { type: 'array', cellDates: true });
+    console.log('[Tracker] Workbook sheets:', wb.SheetNames);
+    const sheet    = wb.Sheets[wb.SheetNames[0]];
+    // header: 1 = return as rows/arrays (no auto-detected headers)
+    // defval: null = empty cells become null instead of being skipped
+    const rows     = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: true });
+    console.log('[Tracker] Total rows read:', rows.length);
+    console.log('[Tracker] First 8 rows:', rows.slice(0, 8));
+    console.log('[Tracker] Sample row 4 (should be first data row):', rows[4]);
+    if (rows[4]) {
+      console.log('[Tracker] Row 4 col 0 type:', typeof rows[4][0], 'value:', rows[4][0]);
+      console.log('[Tracker] Row 4 col 2 type:', typeof rows[4][2], 'value:', rows[4][2]);
+      console.log('[Tracker] Row 4 col 2 instanceof Date?', rows[4][2] instanceof Date);
+    }
+
+    // 2) Walk the rows, collecting worker+date → aggregated zone data
+    const trackerMap  = parseTrackerRows(rows);
+    const trackerKeys = Object.keys(trackerMap);
+    console.log('[Tracker] Parsed keys count:', trackerKeys.length);
+    console.log('[Tracker] First 3 keys:', trackerKeys.slice(0, 3));
+
+    if (trackerKeys.length === 0) {
+      errEl.textContent = 'No tracker data found in this file. Make sure it has the expected Name/Zone/Start/End layout.';
+      errEl.style.display = 'flex';
+      btn.disabled = false;
+      btnTxt.innerHTML = 'Process Tracker File';
+      return;
+    }
+
+    // 3) Load workers and their tracker_id mappings (for Name → HB name lookup)
+    await refreshWorkersCache();
+    const trackerIdToWorker = {};   // "Eric" → { name: "Eric Yeboah", ... }
+    for (const w of Object.values(workersByName)) {
+      if (w.tracker_id && w.is_tracked !== false) {
+        trackerIdToWorker[w.tracker_id] = w;
+      }
+    }
+
+    // 4) Figure out the date range covered by this tracker file
+    const allDates = trackerKeys.map(k => k.split('|')[1]).sort();
+    const startDate = allDates[0];
+    const endDate   = allDates[allDates.length - 1];
+
+    // 5) Fetch Homebase shifts in that date range — to compute diffs
+    const { data: hbShifts } = await sb.from('hourly_shifts')
+      .select('worker_name, shift_date, actual_in, clock_in, actual_out, clock_out')
+      .gte('shift_date', startDate)
+      .lte('shift_date', endDate);
+    // Build a lookup: "Eric Yeboah|2026-04-01" → shift row
+    const hbLookup = {};
+    (hbShifts || []).forEach(s => { hbLookup[s.worker_name + '|' + s.shift_date] = s; });
+
+    // 6) Build rows to insert into tracker_shifts — one per tracker entry
+    const insertRows = [];
+    let matchedCount = 0;   // had both tracker + HB entry
+    let skippedCount = 0;   // tracker name not mapped to any worker
+    let noHBCount    = 0;   // tracker entry but no HB shift that day
+
+    for (const key of trackerKeys) {
+      const [trName, dateStr] = key.split('|');
+      const worker = trackerIdToWorker[trName];
+      if (!worker) { skippedCount++; continue; }
+
+      const t       = trackerMap[key];
+      const hbShift = hbLookup[worker.name + '|' + dateStr];
+
+      // Compute diffs vs the 7 AM baseline (that's what the script uses — NOT actual HB clock-in)
+      const baseline = parseDateAtHour(dateStr, TRACKER_SHIFT_START_HOUR);
+      const hbOutDt  = hbShift ? parseHBTimeForTracker(hbShift.clock_out, dateStr) : null;
+
+      // Find the top zone (the zone with the most minutes)
+      let topZone = null, topMinutes = -1, topZoneFirst = null, topZoneLast = null;
+      for (const [zname, zd] of Object.entries(t.zones)) {
+        if (zd.mins > topMinutes) {
+          topMinutes = zd.mins;
+          topZone    = zname;
+          topZoneFirst = zd.first;
+          topZoneLast  = zd.last;
+        }
+      }
+
+      // Floor diffs
+      const floorDiffIn  = (baseline && t.floor) ? Math.round((t.floor.first - baseline) / 60000) : null;
+      const floorDiffOut = (hbOutDt  && t.floor) ? Math.round((t.floor.last  - hbOutDt)  / 60000) : null;
+
+      // Zone diffs (for the top zone)
+      const zoneDiffIn   = (baseline && topZoneFirst) ? Math.round((topZoneFirst - baseline) / 60000) : null;
+      const zoneDiffOut  = (hbOutDt  && topZoneLast)  ? Math.round((topZoneLast  - hbOutDt)  / 60000) : null;
+
+      // Status chip — use the worst (furthest from zero) of each direction
+      let status;
+      if (!hbShift) {
+        status = 'no_hb';
+        noHBCount++;
+      } else {
+        matchedCount++;
+        const inDiffs  = [floorDiffIn,  zoneDiffIn ].filter(v => v !== null);
+        const outDiffs = [floorDiffOut, zoneDiffOut].filter(v => v !== null);
+        const worstIn  = inDiffs.length  ? inDiffs.reduce( (a,b) => Math.abs(a)>Math.abs(b)?a:b) : null;
+        const worstOut = outDiffs.length ? outDiffs.reduce((a,b) => Math.abs(a)>Math.abs(b)?a:b) : null;
+        status = calcTrackerStatus(worstIn, worstOut);
+      }
+
+      insertRows.push({
+        worker_name:      worker.name,
+        shift_date:       dateStr,
+        first_seen:       t.first.toISOString(),
+        last_seen:        t.last.toISOString(),
+        floor_first:      t.floor ? t.floor.first.toISOString() : null,
+        floor_last:       t.floor ? t.floor.last.toISOString()  : null,
+        top_zone:         topZone,
+        top_zone_first:   topZoneFirst ? topZoneFirst.toISOString() : null,
+        top_zone_last:    topZoneLast  ? topZoneLast.toISOString()  : null,
+        top_zone_minutes: topMinutes > 0 ? topMinutes : null,
+        floor_diff_in:    floorDiffIn,
+        floor_diff_out:   floorDiffOut,
+        zone_diff_in:     zoneDiffIn,
+        zone_diff_out:    zoneDiffOut,
+        status:           status
+      });
+    }
+
+    // 7) Log this upload and save all the shift rows
+    const { data: uploadRow } = await sb.from('tracker_uploads').insert({
+      period_label:    startDate + ' to ' + endDate,
+      rows_parsed:     trackerKeys.length,
+      workers_matched: matchedCount,
+      filename:        trackerFile.name
+    }).select('id').single();
+
+    if (insertRows.length > 0) {
+      // Tag every row with the upload id for history tracking
+      const rowsWithUpload = insertRows.map(r => ({ ...r, tracker_upload_id: uploadRow ? uploadRow.id : null }));
+      // upsert replaces existing rows for the same worker+date (constraint we created in Step 1)
+      const { error: upErr } = await sb.from('tracker_shifts')
+        .upsert(rowsWithUpload, { onConflict: 'worker_name,shift_date' });
+      if (upErr) throw new Error('Save failed: ' + upErr.message);
+    }
+
+    // 8) Show summary
+    const redFlags = insertRows.filter(r => r.status && r.status.includes('red')).length;
+    sucEl.innerHTML =
+      '✅ Tracker processed for ' + startDate + ' to ' + endDate + '<br>' +
+      '&nbsp;&nbsp;• ' + matchedCount + ' shifts matched to Homebase<br>' +
+      (noHBCount    > 0 ? '&nbsp;&nbsp;• ⚠️ ' + noHBCount    + ' tracker entries without a Homebase shift<br>' : '') +
+      (skippedCount > 0 ? '&nbsp;&nbsp;• ⏭️ ' + skippedCount + ' tracker entries for unmapped workers (no Tracker ID in Staff)<br>' : '') +
+      (redFlags     > 0 ? '&nbsp;&nbsp;• 🔴 ' + redFlags     + ' red flags (late >30 min or left >30 min early)' : '');
+    sucEl.style.display = 'flex';
+
+    // Reset the file picker so re-uploading works cleanly
+    trackerFile = null;
+    document.getElementById('tracker-drop-label').textContent = 'Drop tracker .xlsx file here';
+    document.getElementById('tracker-drop-zone').style.borderColor = 'var(--gray-200)';
+    document.getElementById('tracker-drop-zone').style.background  = 'var(--gray-50)';
+    document.getElementById('tracker-file').value = '';
+
+  } catch (err) {
+    errEl.textContent = 'Error: ' + err.message;
+    errEl.style.display = 'flex';
+    console.error(err);
+  }
+
+  btn.disabled = false;
+  btnTxt.innerHTML = 'Process Tracker File';
+}
+
+// ── PARSER: walks rows, returns { "tracker_name|yyyy-mm-dd": {...} } ────
+function parseTrackerRows(rows) {
+  const result = {};
+  let curWorker = null;
+  let curDate   = null;
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i] || [];
+    const c0 = String(row[0] || '').trim();
+    const c1 = String(row[1] || '').trim();
+    const c2 = row[2];
+    const c3 = row[3];
+
+    // "Name" rows start a new worker block
+    if (c0 === 'Name') {
+      curWorker = String(row[1] || '').trim();
+      curDate = null;
+      continue;
+    }
+    // Header rows / summary rows / blank rows → skip
+    if (c0 === 'Date' || c0 === 'Weekly Summary' || c0.startsWith('Period')) continue;
+    if (c1 === 'Daily' || c1 === 'Weekly Summary' || c1 === 'Zone') continue;
+
+    // If col 0 has a date, update the "current day" for subsequent zone rows
+    if (row[0] !== null && row[0] !== '') {
+      const d = toDate(row[0]);
+      if (d) curDate = toDateKeyLocal(d);
+    }
+
+    // Zone row: col 1 = zone name, col 2 = start, col 3 = end
+    if (curWorker && curDate && c1 && c2 && c3) {
+      const s = toDate(c2);
+      const e = toDate(c3);
+      if (!s || !e || (e - s) < 2000) continue;  // skip spurious short pings
+
+      const key = curWorker + '|' + curDate;
+      if (!result[key]) result[key] = { first: s, last: e, floor: null, zones: {} };
+      const r = result[key];
+
+      if (s < r.first) r.first = s;
+      if (e > r.last)  r.last  = e;
+
+      const zoneName = c1;
+      const mins = Math.round((e - s) / 60000);
+
+      if (zoneName.toLowerCase() === 'floor') {
+        if (!r.floor) {
+          r.floor = { first: s, last: e };
+        } else {
+          if (s < r.floor.first) r.floor.first = s;
+          if (e > r.floor.last)  r.floor.last  = e;
+        }
+      } else {
+        if (!r.zones[zoneName]) {
+          r.zones[zoneName] = { first: s, last: e, mins: mins };
+        } else {
+          const z = r.zones[zoneName];
+          if (s < z.first) z.first = s;
+          if (e > z.last)  z.last  = e;
+          z.mins += mins;
+        }
+      }
+    }
+  }
+  return result;
+}
+
+// ── HELPERS for tracker parsing ─────────────────────────────────
+function toDate(val) {
+  if (!val) return null;
+  if (val instanceof Date && !isNaN(val)) return val;
+  if (typeof val === 'number' && val > 1) {
+    // Excel serial date — convert to JS Date
+    const ms = (val - 25569) * 86400 * 1000;
+    const d = new Date(ms);
+    return isNaN(d) ? null : d;
+  }
+  const d = new Date(String(val).trim());
+  return isNaN(d) ? null : d;
+}
+
+function toDateKeyLocal(d) {
+  // Returns yyyy-mm-dd using local time components (not UTC — avoids timezone drift)
+  const y  = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, '0');
+  const da = String(d.getDate()).padStart(2, '0');
+  return y + '-' + mo + '-' + da;
+}
+
+function parseDateAtHour(dateStr, hour) {
+  // Build a Date object for "dateStr at hour:00:00" in local time
+  if (!dateStr) return null;
+  const parts = dateStr.split('-');
+  return new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]), hour, 0, 0, 0);
+}
+
+function parseHBTimeForTracker(timeStr, dateStr) {
+  // Homebase stores clock-out as "5:30pm" — parse with the given date
+  if (!timeStr || !dateStr) return null;
+  const hm = parseTime(timeStr);
+  if (!hm) return null;
+  const parts = dateStr.split('-');
+  return new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]), hm.h, hm.m, 0, 0);
+}
+
+function calcTrackerStatus(worstIn, worstOut) {
+  // Returns one of: 'on_time' | 'late_yellow' | 'late_red' | 'early_yellow' | 'early_red' | 'both_yellow' | 'both_red'
+  const lateRed    = (typeof worstIn  === 'number') && worstIn  > TRACKER_LATE_RED;
+  const earlyRed   = (typeof worstOut === 'number') && worstOut < TRACKER_EARLY_RED;
+  if (lateRed  && earlyRed)  return 'both_red';
+  if (lateRed)               return 'late_red';
+  if (earlyRed)              return 'early_red';
+
+  const lateYellow  = (typeof worstIn  === 'number') && worstIn  > TRACKER_LATE_YELLOW;
+  const earlyYellow = (typeof worstOut === 'number') && worstOut < TRACKER_EARLY_YELLOW;
+  if (lateYellow && earlyYellow) return 'both_yellow';
+  if (lateYellow) return 'late_yellow';
+  if (earlyYellow) return 'early_yellow';
+
+  return 'on_time';
+}
+
+function detectWeek() {
+  const csv = document.getElementById('csv-input').value.trim();
+  if (!csv) { alert('Please paste CSV data first.'); return; }
+
+  const lines = csv.split('\n').filter(l => l.trim());
+  if (lines.length < 2) { alert('CSV appears to be empty.'); return; }
+
+  // Find earliest date in column B (index 1)
+  let earliest = null;
+  for (let i = 1; i < lines.length; i++) {
+    const cols = parseCSVLine(lines[i]);
+    if (!cols[1]) continue;
+    const d = new Date(cols[1]);
+    if (isNaN(d)) continue;
+    d.setHours(0,0,0,0);
+    if (!earliest || d < earliest) earliest = d;
+  }
+
+  if (!earliest) { alert('Could not detect dates. Make sure column B has dates.'); return; }
+
+  // Roll back to Monday
+  const day  = earliest.getDay();
+  const diff = day === 0 ? 6 : day - 1;
+  detectedWeekStart = new Date(earliest);
+  detectedWeekStart.setDate(earliest.getDate() - diff);
+  detectedWeekStart.setHours(0,0,0,0);
+
+  detectedWeekEnd = new Date(detectedWeekStart);
+  detectedWeekEnd.setDate(detectedWeekStart.getDate() + 7);
+
+  const sunday = new Date(detectedWeekStart);
+  sunday.setDate(detectedWeekStart.getDate() + 6);
+
+  const fmt = d => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  detectedWeekLabel = fmt(detectedWeekStart) + ' - ' + fmt(sunday) + ', ' + sunday.getFullYear();
+
+  const el = document.getElementById('week-detected');
+  el.textContent = 'Week detected: ' + detectedWeekLabel + ' — Click Run Payroll to proceed.';
+  el.style.display = 'flex';
+  document.getElementById('run-btn').disabled = false;
+  document.getElementById('run-error').style.display = 'none';
+  document.getElementById('run-success').style.display = 'none';
+}
+
+// ── RUN PAYROLL ───────────────────────────────────────────────
+async function runPayroll() {
+  if (!detectedWeekStart) { detectWeek(); return; }
+
+  const btn     = document.getElementById('run-btn');
+  const btnText = document.getElementById('run-btn-text');
+  const errEl   = document.getElementById('run-error');
+  const sucEl   = document.getElementById('run-success');
+
+  btn.disabled = true;
+  btnText.innerHTML = '<div class="spinner"></div> Processing...';
+  errEl.style.display = 'none';
+  sucEl.style.display = 'none';
+
+  try {
+    // Refresh the workers cache from Supabase in case Staff changed since login
+    await refreshWorkersCache();
+
+    const csv   = document.getElementById('csv-input').value.trim();
+    const lines = csv.split('\n').filter(l => l.trim());
+
+    // Process hourly shifts
+    const shifts      = processHourlyCSV(lines, detectedWeekStart, detectedWeekEnd);
+    const workerTotals = {}; // name -> { netHrs, pay, lateDays }
+
+    shifts.forEach(s => {
+      if (!workerTotals[s.worker_name]) {
+        workerTotals[s.worker_name] = { netHrs: 0, pay: 0, lateDays: 0 };
+      }
+      workerTotals[s.worker_name].netHrs   += s.net_hrs;
+      workerTotals[s.worker_name].pay      += s.total_pay;
+      // Count late days — clock-in after 7:00am original time
+      if (s.actual_in) {
+        const parts = s.actual_in.match(/(\d+):(\d+)(am|pm)/i);
+        if (parts) {
+          let h = parseInt(parts[1]);
+          if (parts[3].toLowerCase() === 'pm' && h !== 12) h += 12;
+          if (parts[3].toLowerCase() === 'am' && h === 12) h = 0;
+          if (h > 7 || (h === 7 && parseInt(parts[2]) > 0)) {
+            workerTotals[s.worker_name].lateDays++;
+          }
+        }
+      }
+    });
+
+    // Get piece rate data for this week
+    const weekStartStr = detectedWeekStart.toISOString().split('T')[0];
+    const weekEndStr   = detectedWeekEnd.toISOString().split('T')[0];
+
+    const { data: pieceSubs } = await sb.from('piece_submissions')
+      .select('*')
+      .gte('work_date', weekStartStr)
+      .lt('work_date', weekEndStr);
+
+    // Load master rates
+    const { data: ratesData } = await sb.from('master_rates').select('*');
+    const rateMap = {};
+    (ratesData || []).forEach(r => {
+      const key = r.customer_name.toLowerCase() + '|' + r.size.toLowerCase() + '|' + r.prod_type.toLowerCase();
+      rateMap[key] = r.rate;
+    });
+
+    // Calculate piece rate earnings + validate BOL
+    const pieceTotals = {}; // name -> { pay, pieces }
+    const bolMap      = {}; // bol|size -> { bolQty, entries }
+    const flags       = [];
+
+    (pieceSubs || []).forEach(sub => {
+      const key   = sub.bol_number + '|' + sub.size.toLowerCase();
+      if (!bolMap[key]) bolMap[key] = { bolQty: sub.bol_qty || 0, solo: [], team: [] };
+      if (sub.prod_type === 'solo') bolMap[key].solo.push(sub);
+      else                          bolMap[key].team.push(sub);
+    });
+
+    // Validate BOL
+    Object.keys(bolMap).forEach(key => {
+      const b      = bolMap[key];
+      const bolQty = b.bolQty;
+      if (!bolQty) return;
+      const soloTotal = b.solo.reduce((s, e) => s + e.qty, 0);
+      const maxTeam   = b.team.reduce((m, e) => Math.max(m, e.qty), 0);
+      if (soloTotal > bolQty) b.solo.forEach(e => { if (!e.issue) e.issue = 'Solo total (' + soloTotal + ') > BOL qty (' + bolQty + ')'; });
+      if (maxTeam   > bolQty) b.team.forEach(e => { if (e.qty === maxTeam && !e.issue) e.issue = 'Team qty (' + e.qty + ') > BOL qty (' + bolQty + ')'; });
+    });
+
+    (pieceSubs || []).forEach(sub => {
+      const rKey    = sub.customer_name.toLowerCase() + '|' + sub.size.toLowerCase() + '|' + sub.prod_type.toLowerCase();
+      const rate    = rateMap[rKey] || rateMap[sub.customer_name.toLowerCase() + '|' + sub.size.toLowerCase()];
+      const issue   = sub.issue || (!rate ? 'No rate: ' + sub.customer_name + ' | ' + sub.size + ' | ' + sub.prod_type : '');
+      const earnings = rate ? sub.qty * rate : 0;
+
+      if (issue) flags.push({ ...sub, issue });
+
+      if (!pieceTotals[sub.worker_name]) pieceTotals[sub.worker_name] = { pay: 0, pieces: 0 };
+      pieceTotals[sub.worker_name].pay    += earnings;
+      pieceTotals[sub.worker_name].pieces += sub.qty;
+
+      // Update submission with rate + earnings
+      sb.from('piece_submissions').update({ rate: rate || null, earnings: earnings, issue: issue })
+        .eq('id', sub.id);
+    });
+
+    // Create or update week period
+    const weekTag = 'Week ' + detectedWeekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    const { data: existingWeek } = await sb.from('week_periods')
+      .select('id').eq('week_start', weekStartStr).single();
+
+    let weekId;
+    if (existingWeek) {
+      weekId = existingWeek.id;
+      await sb.from('week_periods').update({ label: detectedWeekLabel, updated_at: new Date().toISOString() }).eq('id', weekId);
+      await sb.from('hourly_shifts').delete().eq('week_id', weekId);
+      await sb.from('worker_week_summary').delete().eq('week_id', weekId);
+    } else {
+      const { data: newWeek } = await sb.from('week_periods').insert({
+        week_start: weekStartStr,
+        week_end:   weekEndStr,
+        label:      detectedWeekLabel,
+        status:     'draft'
+      }).select('id').single();
+      weekId = newWeek.id;
+    }
+
+    // Insert shifts
+    if (shifts.length > 0) {
+      const shiftsWithWeek = shifts.map(s => ({ ...s, week_id: weekId }));
+      await sb.from('hourly_shifts').insert(shiftsWithWeek);
+    }
+
+    // Update piece submissions with week_id
+    if (pieceSubs && pieceSubs.length > 0) {
+      await sb.from('piece_submissions').update({ week_id: weekId })
+        .gte('work_date', weekStartStr).lt('work_date', weekEndStr);
+    }
+
+    // Build worker week summary
+    const allWorkers = new Set([...Object.keys(workerTotals), ...Object.keys(pieceTotals)]);
+    const summaryRows = [];
+
+    allWorkers.forEach(name => {
+      const h = workerTotals[name]  || { netHrs: 0, pay: 0, lateDays: 0 };
+      const p = pieceTotals[name]   || { pay: 0, pieces: 0 };
+      const hasFlag = flags.some(f => f.worker_name === name);
+      summaryRows.push({
+        week_id:      weekId,
+        worker_name:  name,
+        net_hrs:      Math.round(h.netHrs * 100) / 100,
+        hourly_pay:   Math.round(h.pay    * 100) / 100,
+        piece_pay:    Math.round(p.pay    * 100) / 100,
+        total_pay:    Math.round((h.pay + p.pay) * 100) / 100,
+        pieces_built: p.pieces,
+        late_days:    h.lateDays,
+        has_flag:     hasFlag
+      });
+    });
+
+    if (summaryRows.length > 0) {
+      await sb.from('worker_week_summary').insert(summaryRows);
+    }
+
+    currentWeekId = weekId;
+    sucEl.textContent = '✅ Payroll complete for ' + detectedWeekLabel +
+      (flags.length > 0 ? ' — ' + flags.length + ' flag(s) need review.' : ' — No issues found.');
+    sucEl.style.display = 'flex';
+    loadDashboard();
+    loadWeekDropdowns();
+
+  } catch (err) {
+    errEl.textContent = 'Error: ' + err.message;
+    errEl.style.display = 'flex';
+    console.error(err);
+  }
+
+  btn.disabled = false;
+  btnText.innerHTML = '🚀 Run Payroll';
+}
+
+// ── PROCESS HOURLY CSV ────────────────────────────────────────
+function processHourlyCSV(lines, weekStart, weekEnd) {
+  const shifts   = [];
+  const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+  for (let i = 1; i < lines.length; i++) {
+    const cols = parseCSVLine(lines[i]);
+    const name = (cols[0] || '').trim();
+    if (!name) continue;
+
+    const ciDate = parseDate(cols[1]);
+    const coDate = parseDate(cols[3]);
+    const ciHM   = parseTime(cols[2]);
+    const coHM   = parseTime(cols[4]);
+    if (!ciDate || !coDate || !ciHM || !coHM) continue;
+    if (ciDate < weekStart || ciDate >= weekEnd) continue;
+
+    // Look up this worker in the live cache (loaded from Supabase `workers` table).
+    // If they're not in the cache, we skip them — payroll only runs for workers
+    // that exist on the Staff page.
+    const worker = workersByName[name];
+    if (!worker) {
+      console.warn('Skipping unknown worker (not in Staff roster): ' + name);
+      continue;
+    }
+
+    let inHM  = roundUp15(ciHM);
+    let outHM = roundDown15(coHM);
+
+    // Apply the 7 AM start cap — unless this worker is exempt (no_7am_cap flag)
+    if (inHM.h < 7 && !worker.no_7am_cap) inHM = { h: 7, m: 0 };
+
+    let inMin  = toMin(inHM);
+    let outMin = toMin(outHM);
+    if (coDate > ciDate || outMin < inMin) outMin += 1440;
+
+    const rawHrs   = Math.max(0, (outMin - inMin) / 60);
+    const brkMins  = calcBreak(outHM, worker, coDate);
+    const netHrs   = Math.max(0, rawHrs - brkMins / 60);
+    const totalPay = Math.round(netHrs * worker.rate * 100) / 100;
+
+    shifts.push({
+      worker_name: name,
+      shift_date:  ciDate.toISOString().split('T')[0],
+      day_name:    dayNames[ciDate.getDay()],
+      actual_in:   fmtTime(ciHM),
+      actual_out:  fmtTime(coHM),
+      clock_in:    fmtTime(inHM),
+      clock_out:   fmtTime(outHM),
+      raw_hrs:     Math.round(rawHrs * 100) / 100,
+      break_mins:  brkMins,
+      net_hrs:     Math.round(netHrs * 100) / 100,
+      hourly_rate: worker.rate,
+      total_pay:   totalPay
+    });
+  }
+  return shifts;
+}
+
+// ── BREAK CALCULATION ─────────────────────────────────────────
+// Reads the break_rule and saturday_rule fields from the worker object
+// (as stored in the Supabase `workers` table).
+function calcBreak(outHM, worker, date) {
+  const rule     = worker.break_rule || 'standard';
+  const saturday = worker.saturday_rule;
+  const mins     = toMin(outHM);
+  const isNight  = outHM.h < 7;
+
+  // Rule: never deduct any break
+  if (rule === 'no_break') return 0;
+
+  // Rule: always deduct a flat 30 min
+  if (rule === 'flat_30') return 30;
+
+  // Saturday-specific variation (currently only Chris Gruchalla)
+  if (saturday && date.getDay() === 6) return mins < 870 ? 0 : 30;
+
+  // Rule: extended — 30/60 instead of 30/60/90, plus 60 at night
+  if (rule === 'extended') {
+    if (isNight) return 60;
+    return mins <= 870 ? 30 : 60;
+  }
+
+  // Rule: standard progression capped at 45 min max
+  if (rule === 'capped_45') {
+    const b = isNight ? 90 : (mins <= 870 ? 30 : mins <= 1110 ? 60 : 90);
+    return Math.min(b, 45);
+  }
+
+  // Default standard progression
+  if (isNight)      return 90;
+  if (mins <= 870)  return 30;
+  if (mins <= 1110) return 60;
+  return 90;
+}
+
+// ── TIME / DATE HELPERS ───────────────────────────────────────
+function parseCSVLine(line) {
+  const result = []; let cur = ''; let inQ = false;
+  for (let c of line) {
+    if (c === '"') { inQ = !inQ; }
+    else if (c === ',' && !inQ) { result.push(cur.trim()); cur = ''; }
+    else cur += c;
+  }
+  result.push(cur.trim());
+  return result;
+}
+
+function parseDate(val) {
+  if (!val) return null;
+  const d = new Date(val);
+  if (isNaN(d)) return null;
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+function parseTime(val) {
+  if (!val) return null;
+  if (val instanceof Date) return { h: val.getHours(), m: val.getMinutes() };
+  const s = String(val).trim();
+  const m = s.match(/(\d{1,2}):(\d{2})\s*(am|pm)/i);
+  if (m) {
+    let h = parseInt(m[1]);
+    if (m[3].toLowerCase() === 'pm' && h !== 12) h += 12;
+    if (m[3].toLowerCase() === 'am' && h === 12) h = 0;
+    return { h, m: parseInt(m[2]) };
+  }
+  // Try as date string
+  const d = new Date(val);
+  if (!isNaN(d)) return { h: d.getHours(), m: d.getMinutes() };
+  return null;
+}
+
+function toMin(hm)       { return hm.h * 60 + hm.m; }
+function fromMin(mins)   { mins = (mins + 1440) % 1440; return { h: Math.floor(mins/60), m: mins%60 }; }
+function roundUp15(hm)   { return fromMin(Math.ceil(toMin(hm) / 15) * 15); }
+function roundDown15(hm) { return fromMin(Math.floor(toMin(hm) / 15) * 15); }
+function fmtTime(hm) {
+  const h = hm.h % 12 || 12;
+  return h + ':' + String(hm.m).padStart(2,'0') + (hm.h >= 12 ? 'pm' : 'am');
+}
+function fmtMoney(v) { return '$' + (v||0).toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 }); }
+function fmtDate(d)  { return new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month:'short', day:'numeric' }); }
+
+// ── WORKERS TAB ───────────────────────────────────────────────
+async function loadWeekDropdowns() {
+  const { data: weeks } = await sb.from('week_periods')
+    .select('*').order('week_start', { ascending: false });
+
+  ['workers-week-select','sub-filter-week'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const first = el.options[0].outerHTML;
+    el.innerHTML = first;
+    (weeks || []).forEach(w => {
+      const opt = document.createElement('option');
+      opt.value = w.id;
+      opt.textContent = w.label;
+      el.appendChild(opt);
+    });
+  });
+
+  // Default to latest week
+  if (weeks && weeks.length > 0) {
+    const sel = document.getElementById('workers-week-select');
+    if (sel) { sel.value = weeks[0].id; }
+  }
+}
+
+// ── VIEW TOGGLE ──────────────────────────────────────────────
+function setWorkersView(view) {
+  const isDetail = view === 'detail';
+  document.getElementById('workers-detail-view').style.display  = isDetail ? 'block' : 'none';
+  document.getElementById('workers-summary-view').style.display = isDetail ? 'none'  : 'block';
+  document.getElementById('tab-detail').className  = isDetail ? 'btn btn-primary btn-sm' : 'btn btn-outline btn-sm';
+  document.getElementById('tab-summary').className = isDetail ? 'btn btn-outline btn-sm' : 'btn btn-primary btn-sm';
+}
+
+async function loadWorkersTab() {
+  const weekId = document.getElementById('workers-week-select').value;
+  const shiftsTbody  = document.getElementById('shifts-table');
+  const summaryTbody = document.getElementById('workers-table');
+
+  if (!weekId) {
+    shiftsTbody.innerHTML  = '<tr><td colspan="14" style="padding:32px; text-align:center; color:var(--gray-400)">Select a week</td></tr>';
+    summaryTbody.innerHTML = '<tr><td colspan="7"  style="padding:32px; text-align:center; color:var(--gray-400)">Select a week</td></tr>';
+    return;
+  }
+
+  // Load both shifts and summary in parallel
+  const [{ data: shifts }, { data: summaries }] = await Promise.all([
+    sb.from('hourly_shifts').select('*').eq('week_id', weekId).order('worker_name').order('shift_date'),
+    sb.from('worker_week_summary').select('*').eq('week_id', weekId).order('worker_name')
+  ]);
+
+  // ── POPULATE WORKER FILTER DROPDOWN ──────────────────────
+  // Only show workers who actually have shifts this week
+  const filterSel = document.getElementById('workers-filter');
+  const currentChoice = filterSel.value; // preserve the user's current selection
+  filterSel.innerHTML = '<option value="">— All workers —</option>';
+  (summaries || []).forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s.worker_name;
+    opt.textContent = s.worker_name;
+    filterSel.appendChild(opt);
+  });
+  // Restore the prior choice if it's still in this week's list
+  filterSel.value = currentChoice;
+
+  // ── APPLY FILTER — if a worker is selected, keep only their rows ───
+  const filterName = filterSel.value;
+  let filteredShifts    = shifts;
+  let filteredSummaries = summaries;
+  if (filterName) {
+    filteredShifts    = (shifts    || []).filter(s => s.worker_name === filterName);
+    filteredSummaries = (summaries || []).filter(s => s.worker_name === filterName);
+  }
+
+  // ── DETAIL VIEW: shift rows ──────────────────────────────
+  shiftsTbody.innerHTML = '';
+  if (!filteredShifts || filteredShifts.length === 0) {
+    shiftsTbody.innerHTML = '<tr><td colspan="14" style="padding:32px; text-align:center; color:var(--gray-400)">No shift data for this week</td></tr>';
+  } else {
+    let prevWorker = null;
+    const runningDisplay = {};
+    let grandNetHrs = 0, grandPay = 0;
+
+    // Avatar color palette — one per worker
+    const avatarColors = ['#1F3864','#D4537E','#1D9E75','#185FA5','#854F0B','#7B2D8B','#C00000','#0F6E56','#993556','#3B6D11'];
+    let avatarIdx = 0;
+    const avatarColorMap = {};
+
+    function getInitials(name) {
+      return name.split(' ').map(w => w[0]).join('').substring(0,2).toUpperCase();
+    }
+
+    function getBreakChip(mins) {
+      if (!mins || mins === 0) return '<span style="color:#ccc; font-size:12px;">0</span>';
+      if (mins >= 90) return '<span style="background:#FFE0E0; color:#C00000; font-weight:700; padding:3px 8px; border-radius:5px; font-size:11px;">' + mins + '</span>';
+      if (mins >= 60) return '<span style="background:#FFF0E0; color:#E05000; font-weight:700; padding:3px 8px; border-radius:5px; font-size:11px;">' + mins + '</span>';
+      return '<span style="background:#FFFDE7; color:#856a00; font-weight:700; padding:3px 8px; border-radius:5px; font-size:11px;">' + mins + '</span>';
+    }
+
+    filteredShifts.forEach((s, i) => {
+      if (!avatarColorMap[s.worker_name]) {
+        avatarColorMap[s.worker_name] = avatarColors[avatarIdx % avatarColors.length];
+        avatarIdx++;
+      }
+      if (!runningDisplay[s.worker_name]) runningDisplay[s.worker_name] = 0;
+      runningDisplay[s.worker_name] = Math.round((runningDisplay[s.worker_name] + (s.net_hrs || 0)) * 100) / 100;
+
+      const isNewWorker = s.worker_name !== prevWorker;
+
+      // Subtotal row before each new worker (except first)
+      if (isNewWorker && prevWorker !== null) {
+        const prevSummary = (filteredSummaries || []).find(x => x.worker_name === prevWorker);
+        const prevNetHrs  = prevSummary ? prevSummary.net_hrs    : 0;
+        const prevPay     = prevSummary ? prevSummary.hourly_pay : 0;
+        const subTr = document.createElement('tr');
+        subTr.style.cssText = 'background:#EDF4FF;';
+        subTr.innerHTML = `
+          <td colspan="9" style="color:#1F3864; padding:7px 14px; font-weight:700; font-size:12px; border-top:1.5px solid #BDD7EE; border-bottom:1.5px solid #BDD7EE;">
+            ↳ ${prevWorker} — week total
+          </td>
+          <td style="border-top:1.5px solid #BDD7EE; border-bottom:1.5px solid #BDD7EE;">
+            <span style="background:#BDD7EE; color:#1F3864; font-weight:700; padding:3px 8px; border-radius:5px; font-size:12px;">${prevNetHrs.toFixed(2)}</span>
+          </td>
+          <td style="border-top:1.5px solid #BDD7EE; border-bottom:1.5px solid #BDD7EE;"></td>
+          <td style="border-top:1.5px solid #BDD7EE; border-bottom:1.5px solid #BDD7EE;"></td>
+          <td style="color:#1E5631; font-weight:700; font-size:13px; border-top:1.5px solid #BDD7EE; border-bottom:1.5px solid #BDD7EE;">${fmtMoney(prevPay)}</td>
+        `;
+        shiftsTbody.appendChild(subTr);
+        const spacer = document.createElement('tr');
+        spacer.innerHTML = '<td colspan="13" style="height:6px; background:#f8f9fa;"></td>';
+        shiftsTbody.appendChild(spacer);
+        grandNetHrs += prevNetHrs;
+        grandPay    += prevPay;
+      }
+
+      const tr = document.createElement('tr');
+      tr.style.cssText = 'border-bottom:1px solid #f0f0f0;';
+      tr.onmouseover = function() { if (!this.dataset.sub) this.style.background = '#fafafa'; };
+      tr.onmouseout  = function() { if (!this.dataset.sub) this.style.background = ''; };
+
+      const dateStr = s.shift_date
+        ? new Date(s.shift_date + 'T00:00:00').toLocaleDateString('en-US', { month:'numeric', day:'numeric', year:'numeric' })
+        : '';
+
+      const color  = avatarColorMap[s.worker_name];
+      const worker = workersByName[s.worker_name] || {};
+      const role   = worker.role || '';
+
+      // Worker cell — show avatar + name + role badge on first row, empty on subsequent rows
+      const workerCell = isNewWorker
+        ? `<div style="display:flex; align-items:center; gap:8px;">
+             <div style="width:30px; height:30px; border-radius:50%; background:${color}; display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; color:#fff; flex-shrink:0;">${getInitials(s.worker_name)}</div>
+             <div>
+               <div style="font-weight:700; font-size:13px; color:#1F3864;">${s.worker_name}</div>
+               ${role ? '<span style="font-size:10px; font-weight:600; padding:2px 7px; border-radius:10px; background:#EBF3FF; color:#185FA5; display:inline-block; margin-top:2px;">' + role + '</span>' : ''}
+             </div>
+           </div>`
+        : '';
+
+      tr.innerHTML = `
+        <td style="padding:8px 14px;">${workerCell}</td>
+        <td style="padding:8px 12px; white-space:nowrap;">${dateStr}</td>
+        <td style="padding:8px 12px; color:#888;">${s.day_name || ''}</td>
+        <td contenteditable="true"
+            style="padding:8px 12px; cursor:text; min-width:72px; border:1px solid transparent; border-radius:4px;"
+            onmouseover="this.style.borderColor='#1F3864'; this.style.background='#EBF3FF';"
+            onmouseout="this.style.borderColor='transparent'; this.style.background='';"
+            onblur="saveShiftEdit('${s.id}','clock_in',this.textContent.trim())">${s.clock_in || ''}</td>
+        <td contenteditable="true"
+            style="padding:8px 12px; cursor:text; min-width:72px; border:1px solid transparent; border-radius:4px;"
+            onmouseover="this.style.borderColor='#1F3864'; this.style.background='#EBF3FF';"
+            onmouseout="this.style.borderColor='transparent'; this.style.background='';"
+            onblur="saveShiftEdit('${s.id}','clock_out',this.textContent.trim())">${s.clock_out || ''}</td>
+        <td style="padding:8px 12px; color:#aaa; font-style:italic; font-size:11px;">${s.actual_in || ''}</td>
+        <td style="padding:8px 12px; color:#aaa; font-style:italic; font-size:11px;">${s.actual_out || ''}</td>
+        <td style="padding:8px 12px;">${(s.raw_hrs || 0).toFixed(2)}</td>
+        <td contenteditable="true"
+            style="padding:8px 12px; cursor:text; min-width:42px; border:1px solid transparent; border-radius:4px;"
+            onmouseover="this.style.borderColor='#1F3864'; this.style.background='#EBF3FF';"
+            onmouseout="this.style.borderColor='transparent'; this.style.background='';"
+            onblur="saveShiftEdit('${s.id}','break_mins',this.textContent.trim())">${getBreakChip(s.break_mins)}</td>
+        <td style="padding:8px 12px;"><span style="background:#E8F5E9; color:#1E5631; font-weight:700; padding:3px 8px; border-radius:5px; font-size:12px;">${(s.net_hrs || 0).toFixed(2)}</span></td>
+        <td style="padding:8px 12px; color:#555;">${runningDisplay[s.worker_name].toFixed(2)}</td>
+        <td style="padding:8px 12px; color:#888;">$${(s.hourly_rate || 0).toFixed(2)}</td>
+        <td style="padding:8px 12px; color:#1E5631; font-weight:700;">${fmtMoney(s.total_pay)}</td>
+      `;
+      shiftsTbody.appendChild(tr);
+      prevWorker = s.worker_name;
+    });
+
+    // Last worker subtotal
+    if (prevWorker) {
+      const prevSummary = (filteredSummaries || []).find(x => x.worker_name === prevWorker);
+      const prevNetHrs  = prevSummary ? prevSummary.net_hrs    : 0;
+      const prevPay     = prevSummary ? prevSummary.hourly_pay : 0;
+      const subTr = document.createElement('tr');
+      subTr.style.cssText = 'background:#EDF4FF;';
+      subTr.innerHTML = `
+        <td colspan="9" style="color:#1F3864; padding:7px 14px; font-weight:700; font-size:12px; border-top:1.5px solid #BDD7EE; border-bottom:1.5px solid #BDD7EE;">
+          ↳ ${prevWorker} — week total
+        </td>
+        <td style="border-top:1.5px solid #BDD7EE; border-bottom:1.5px solid #BDD7EE;">
+          <span style="background:#BDD7EE; color:#1F3864; font-weight:700; padding:3px 8px; border-radius:5px; font-size:12px;">${prevNetHrs.toFixed(2)}</span>
+        </td>
+        <td style="border-top:1.5px solid #BDD7EE; border-bottom:1.5px solid #BDD7EE;"></td>
+        <td style="border-top:1.5px solid #BDD7EE; border-bottom:1.5px solid #BDD7EE;"></td>
+        <td style="color:#1E5631; font-weight:700; font-size:13px; border-top:1.5px solid #BDD7EE; border-bottom:1.5px solid #BDD7EE;">${fmtMoney(prevPay)}</td>
+      `;
+      shiftsTbody.appendChild(subTr);
+      grandNetHrs += prevNetHrs;
+      grandPay    += prevPay;
+    }
+
+    // Grand total
+    const grandTr = document.createElement('tr');
+    grandTr.style.cssText = 'background:#1E5631;';
+    grandTr.innerHTML = `
+      <td colspan="9" style="padding:10px 14px; color:#fff; font-weight:700; font-size:13px; letter-spacing:0.5px; text-transform:uppercase;">Grand Total</td>
+      <td style="padding:10px 12px;"><span style="background:#155227; color:#fff; font-weight:700; padding:3px 8px; border-radius:5px;">${grandNetHrs.toFixed(2)}</span></td>
+      <td></td><td></td>
+      <td style="padding:10px 12px; color:#fff; font-weight:700; font-size:14px;">${fmtMoney(grandPay)}</td>
+    `;
+    shiftsTbody.appendChild(grandTr);
+  }
+
+  // ── SUMMARY VIEW ─────────────────────────────────────────
+  summaryTbody.innerHTML = '';
+  let hasFlags = false;
+  (filteredSummaries || []).forEach(s => {
+    if (s.has_flag) hasFlags = true;
+    const tr = document.createElement('tr');
+    const worker = workersByName[s.worker_name] || {};
+    tr.innerHTML = `
+      <td><strong>${s.worker_name}</strong></td>
+      <td>${worker.role || 'Piece Rate'}</td>
+      <td class="td-hrs">${s.net_hrs > 0 ? s.net_hrs.toFixed(2) : '—'}</td>
+      <td class="td-money">${s.hourly_pay > 0 ? fmtMoney(s.hourly_pay) : '—'}</td>
+      <td style="color:var(--purple); font-weight:600;">${s.piece_pay > 0 ? fmtMoney(s.piece_pay) : '—'}</td>
+      <td class="td-money" style="font-size:14px;">${fmtMoney(s.total_pay)}</td>
+      <td class="td-flag">${s.has_flag ? '🚩' : ''}</td>
+    `;
+    summaryTbody.appendChild(tr);
+  });
+
+  if (!filteredSummaries || filteredSummaries.length === 0) {
+    summaryTbody.innerHTML = '<tr><td colspan="7" style="padding:32px; text-align:center; color:var(--gray-400)">No data for this week</td></tr>';
+  }
+
+  // ── FLAGS ────────────────────────────────────────────────
+  const flagsSection = document.getElementById('flags-section');
+  if (hasFlags) {
+    flagsSection.style.display = 'block';
+    const { data: flagSubs } = await sb.from('piece_submissions')
+      .select('*').eq('week_id', weekId).neq('issue', '');
+    const ftbody = document.getElementById('flags-table');
+    ftbody.innerHTML = '';
+    (flagSubs || []).forEach(f => {
+      const tr = document.createElement('tr');
+      tr.style.background = 'var(--red-light)';
+      tr.innerHTML = `
+        <td>${f.worker_name}</td>
+        <td class="td-muted">${fmtDate(f.work_date)}</td>
+        <td>${f.bol_number}</td>
+        <td>${f.customer_name} | ${f.size} | ${f.prod_type}</td>
+        <td>${f.qty}</td>
+        <td style="color:var(--red); font-weight:600;">${f.issue}</td>
+      `;
+      ftbody.appendChild(tr);
+    });
+  } else {
+    flagsSection.style.display = 'none';
+  }
+}
+
+// Save edits to clock-in/out back to Supabase
+async function saveShiftEdit(shiftId, field, value) {
+  // First get the full shift so we can recalculate everything
+  const { data: shift } = await sb.from('hourly_shifts').select('*').eq('id', shiftId).single();
+  if (!shift) return;
+
+  // Apply the edit
+  const updated = Object.assign({}, shift);
+
+  // ─── BRANCH 1: user edited the break minutes manually ───
+  // We trust their number and only recalc net hours + total pay.
+  if (field === 'break_mins') {
+    // Strip anything that isn't a digit (e.g. "30 min" → "30")
+    const cleaned = String(value).replace(/[^\d]/g, '');
+    const brkMins = parseInt(cleaned);
+    if (isNaN(brkMins) || brkMins < 0) {
+      alert('Please enter a whole number of minutes (e.g. 30, 45, 60).');
+      loadWorkersTab(); // reload to wipe the bad text from the cell
+      return;
+    }
+    updated.break_mins = brkMins;
+    // Recalc net hours using the existing raw hours minus the new break
+    const netHrs   = Math.max(0, (shift.raw_hrs || 0) - brkMins / 60);
+    const totalPay = Math.round(netHrs * (shift.hourly_rate || 0) * 100) / 100;
+    updated.net_hrs   = Math.round(netHrs * 100) / 100;
+    updated.total_pay = totalPay;
+
+  // ─── BRANCH 2: user edited a clock time ───
+  // Recalculate everything from scratch, including auto-break.
+  } else {
+    updated[field] = value;
+    const inHM  = parseTime(updated.clock_in);
+    const outHM = parseTime(updated.clock_out);
+
+    if (inHM && outHM) {
+      let inMin  = toMin(inHM);
+      let outMin = toMin(outHM);
+      if (outMin <= inMin) outMin += 1440; // overnight
+
+      const rawHrs   = Math.max(0, (outMin - inMin) / 60);
+      // calcBreak needs the worker's break_rule and saturday_rule from the cache.
+      // Fall back to an empty object (which defaults to 'standard' rule) if worker isn't found.
+      const worker   = workersByName[shift.worker_name] || {};
+      const brkMins  = calcBreak(outHM, worker, new Date(shift.shift_date + 'T00:00:00'));
+      const netHrs   = Math.max(0, rawHrs - brkMins / 60);
+      const totalPay = Math.round(netHrs * (shift.hourly_rate || 0) * 100) / 100;
+
+      updated.raw_hrs    = Math.round(rawHrs * 100) / 100;
+      updated.break_mins = brkMins;
+      updated.net_hrs    = Math.round(netHrs * 100) / 100;
+      updated.total_pay  = totalPay;
+    }
+  }
+
+  // Save all recalculated fields back to database
+  const { error } = await sb.from('hourly_shifts').update({
+    clock_in:   updated.clock_in,
+    clock_out:  updated.clock_out,
+    raw_hrs:    updated.raw_hrs,
+    break_mins: updated.break_mins,
+    net_hrs:    updated.net_hrs,
+    total_pay:  updated.total_pay
+  }).eq('id', shiftId);
+
+  if (error) {
+    alert('Could not save: ' + error.message);
+    return;
+  }
+
+  // Also update the worker_week_summary totals for this worker
+  const weekId = shift.week_id;
+  if (weekId) {
+    const { data: allShifts } = await sb.from('hourly_shifts')
+      .select('net_hrs, total_pay, clock_in, actual_in')
+      .eq('week_id', weekId)
+      .eq('worker_name', shift.worker_name);
+
+    if (allShifts) {
+      const totalNetHrs = allShifts.reduce((s, r) => s + (r.net_hrs || 0), 0);
+      const totalPay    = allShifts.reduce((s, r) => s + (r.total_pay || 0), 0);
+      // Count late days — clock in after 7:00am actual time
+      let lateDays = 0;
+      allShifts.forEach(r => {
+        const hm = parseTime(r.actual_in || r.clock_in);
+        if (hm && (hm.h > 7 || (hm.h === 7 && hm.m > 0))) lateDays++;
+      });
+
+      await sb.from('worker_week_summary').update({
+        net_hrs:    Math.round(totalNetHrs * 100) / 100,
+        hourly_pay: Math.round(totalPay    * 100) / 100,
+        total_pay:  Math.round(totalPay    * 100) / 100,
+        late_days:  lateDays
+      }).eq('week_id', weekId).eq('worker_name', shift.worker_name);
+    }
+  }
+
+  // Reload tab to show updated values
+  loadWorkersTab();
+}
+
+// ── HISTORY ───────────────────────────────────────────────────
+async function loadHistory() {
+  const { data: weeks } = await sb.from('week_periods')
+    .select('*').order('week_start', { ascending: false });
+
+  const tbody = document.getElementById('history-table');
+  tbody.innerHTML = '';
+
+  if (!weeks || weeks.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" style="padding:32px; text-align:center; color:var(--gray-400)">No weeks processed yet</td></tr>';
+    return;
+  }
+
+  for (const week of weeks) {
+    const { data: sums } = await sb.from('worker_week_summary')
+      .select('worker_name, net_hrs, hourly_pay, piece_pay, total_pay')
+      .eq('week_id', week.id);
+
+    const totHrs     = (sums || []).reduce((s, r) => s + (r.net_hrs    || 0), 0);
+    const totHourly  = (sums || []).reduce((s, r) => s + (r.hourly_pay || 0), 0);
+    const totPiece   = (sums || []).reduce((s, r) => s + (r.piece_pay  || 0), 0);
+    const totPay     = (sums || []).reduce((s, r) => s + (r.total_pay  || 0), 0);
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><strong>${week.label}</strong></td>
+      <td><span class="chip ${week.status === 'final' ? 'chip-green' : 'chip-amber'}">${week.status}</span></td>
+      <td>${(sums || []).length}</td>
+      <td class="td-hrs">${totHrs.toFixed(2)}</td>
+      <td class="td-money">${fmtMoney(totHourly)}</td>
+      <td style="color:var(--purple); font-weight:600;">${fmtMoney(totPiece)}</td>
+      <td class="td-money" style="font-size:14px;">${fmtMoney(totPay)}</td>
+      <td><button class="btn btn-outline btn-sm" onclick="viewWeek('${week.id}')">View</button></td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+function viewWeek(weekId) {
+  document.getElementById('workers-week-select').value = weekId;
+  nav('workers');
+  loadWorkersTab();
+}
+
+// ── SUBMISSIONS ───────────────────────────────────────────────
+async function loadSubmissions() {
+  const { data } = await sb.from('piece_submissions')
+    .select('*').order('submitted_at', { ascending: false });
+  allSubmissions = data || [];
+  renderSubmissions(allSubmissions);
+}
+
+function filterSubmissions() {
+  const search  = document.getElementById('sub-search').value.toLowerCase();
+  const weekId  = document.getElementById('sub-filter-week').value;
+  let filtered  = allSubmissions;
+  if (search)  filtered = filtered.filter(s => s.worker_name.toLowerCase().includes(search) || s.bol_number.includes(search));
+  if (weekId)  filtered = filtered.filter(s => s.week_id === weekId);
+  renderSubmissions(filtered);
+}
+
+function renderSubmissions(subs) {
+  const tbody = document.getElementById('submissions-table');
+  tbody.innerHTML = '';
+  if (!subs || subs.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="10" style="padding:32px; text-align:center; color:var(--gray-400)">No submissions found</td></tr>';
+    return;
+  }
+  subs.forEach(s => {
+    const tr = document.createElement('tr');
+    if (s.issue) tr.style.background = 'var(--red-light)';
+    tr.innerHTML = `
+      <td><strong>${s.worker_name}</strong>${s.is_late ? ' <span class="chip chip-amber">🕐 Late</span>' : ''}</td>
+      <td class="td-muted">${fmtDate(s.work_date)}</td>
+      <td>${s.bol_number}</td>
+      <td>${s.customer_name}</td>
+      <td>${s.size} | <span class="chip ${s.prod_type === 'team' ? 'chip-purple' : 'chip-green'}">${s.prod_type}</span></td>
+      <td>${s.qty}</td>
+      <td class="td-muted">${s.bol_qty || '—'}</td>
+      <td class="td-muted">${s.rate ? '$' + Number(s.rate).toFixed(4) : '—'}</td>
+      <td class="td-money">${s.earnings ? fmtMoney(s.earnings) : '—'}</td>
+      <td class="td-flag">${s.issue ? '🚩' : ''}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+// ── MASTER RATES ──────────────────────────────────────────────
+async function loadRates() {
+  const { data } = await sb.from('master_rates').select('*').order('customer_name').order('size');
+  const tbody = document.getElementById('rates-table');
+  tbody.innerHTML = '';
+  if (!data || data.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" style="padding:32px; text-align:center; color:var(--gray-400)">No rates added yet</td></tr>';
+    return;
+  }
+  data.forEach(r => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${r.customer_name}</td>
+      <td><span class="chip ${r.prod_type === 'team' ? 'chip-purple' : 'chip-green'}">${r.prod_type}</span></td>
+      <td>${r.size}</td>
+      <td class="td-money">$${Number(r.rate).toFixed(4)}</td>
+      <td><button class="btn btn-outline btn-sm" style="color:var(--red);" onclick="deleteRate('${r.id}')">Delete</button></td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+async function addRate() {
+  const customer = document.getElementById('rate-customer').value.trim();
+  const type     = document.getElementById('rate-type').value;
+  const size     = document.getElementById('rate-size').value.trim();
+  const rate     = parseFloat(document.getElementById('rate-value').value);
+  const sucEl    = document.getElementById('rate-success');
+  const errEl    = document.getElementById('rate-error');
+  sucEl.style.display = 'none'; errEl.style.display = 'none';
+
+  if (!customer || !size || isNaN(rate)) {
+    errEl.textContent = 'Please fill in all fields.'; errEl.style.display = 'flex'; return;
+  }
+
+  const { error } = await sb.from('master_rates').upsert({
+    customer_name: customer, prod_type: type, size: size,
+    rate: rate, updated_at: new Date().toISOString()
+  }, { onConflict: 'customer_name,prod_type,size' });
+
+  if (error) { errEl.textContent = error.message; errEl.style.display = 'flex'; }
+  else {
+    sucEl.textContent = '✅ Rate saved: ' + customer + ' | ' + size + ' | ' + type + ' = $' + rate.toFixed(4);
+    sucEl.style.display = 'flex';
+    document.getElementById('rate-customer').value = '';
+    document.getElementById('rate-size').value     = '';
+    document.getElementById('rate-value').value    = '';
+    loadRates();
+  }
+}
+
+async function deleteRate(id) {
+  if (!confirm('Delete this rate?')) return;
+  await sb.from('master_rates').delete().eq('id', id);
+  loadRates();
+}
+
+// ── PERFORMANCE ───────────────────────────────────────────────
+async function populateWorkerSelect() {
+  const sel = document.getElementById('perf-worker-select');
+  Object.keys(workersByName).sort().forEach(name => {
+    const opt = document.createElement('option');
+    opt.value = name; opt.textContent = name;
+    sel.appendChild(opt);
+  });
+}
+
+async function loadPerformance() {
+  const workerName = document.getElementById('perf-worker-select').value;
+
+  let query = sb.from('worker_week_summary')
+    .select('*, week_periods(label, week_start)')
+    .order('week_periods(week_start)', { ascending: false });
+  if (workerName) query = query.eq('worker_name', workerName);
+
+  const { data: summaries } = await query;
+
+  const rows = summaries || [];
+
+  const totalHrs   = rows.reduce((s, r) => s + (r.net_hrs    || 0), 0);
+  const totalPay   = rows.reduce((s, r) => s + (r.total_pay  || 0), 0);
+  const totalPieces= rows.reduce((s, r) => s + (r.pieces_built|| 0), 0);
+  const lateDays   = rows.reduce((s, r) => s + (r.late_days   || 0), 0);
+
+  document.getElementById('ps-hrs').textContent     = rows.length > 0 ? (totalHrs / rows.length).toFixed(1) : '—';
+  document.getElementById('ps-pieces').textContent  = totalPieces;
+  document.getElementById('ps-earnings').textContent = fmtMoney(totalPay);
+  document.getElementById('ps-late').textContent    = lateDays;
+
+  // Hours table
+  const htbody = document.getElementById('perf-hours-table');
+  htbody.innerHTML = '';
+  rows.forEach(r => {
+    const tr = document.createElement('tr');
+    const label = r.week_periods ? r.week_periods.label : '—';
+    tr.innerHTML = `
+      <td class="td-muted">${label}</td>
+      <td class="td-hrs">${(r.net_hrs || 0).toFixed(2)}</td>
+      <td>${r.late_days > 0 ? '<span class="chip chip-amber">' + r.late_days + ' late</span>' : '—'}</td>
+      <td class="td-money">${fmtMoney(r.hourly_pay)}</td>
+    `;
+    htbody.appendChild(tr);
+  });
+  if (rows.length === 0) htbody.innerHTML = '<tr><td colspan="4" style="padding:24px; text-align:center; color:var(--gray-400)">No data</td></tr>';
+
+  // Piece table
+  const ptbody = document.getElementById('perf-piece-table');
+  ptbody.innerHTML = '';
+  rows.forEach(r => {
+    if (!r.pieces_built && !r.piece_pay) return;
+    const tr = document.createElement('tr');
+    const label = r.week_periods ? r.week_periods.label : '—';
+    tr.innerHTML = `
+      <td class="td-muted">${label}</td>
+      <td>${r.pieces_built || 0}</td>
+      <td style="color:var(--purple); font-weight:600;">${fmtMoney(r.piece_pay)}</td>
+    `;
+    ptbody.appendChild(tr);
+  });
+  if (ptbody.innerHTML === '') ptbody.innerHTML = '<tr><td colspan="3" style="padding:24px; text-align:center; color:var(--gray-400)">No piece rate data</td></tr>';
+}
+
+// ── STAFF ROSTER ──────────────────────────────────────────────
+async function loadStaff() {
+  const tbody = document.getElementById('staff-table');
+  tbody.innerHTML = '<tr><td colspan="8" style="padding:32px; text-align:center; color:var(--gray-400)">Loading...</td></tr>';
+
+  // Fetch every worker from the Supabase workers table, A → Z by name
+  const { data: staff, error } = await sb.from('workers')
+    .select('*')
+    .order('name', { ascending: true });
+
+  if (error) {
+    tbody.innerHTML = '<tr><td colspan="8" style="padding:32px; text-align:center; color:var(--red)">Error loading staff: ' + error.message + '</td></tr>';
+    return;
+  }
+
+  if (!staff || staff.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" style="padding:32px; text-align:center; color:var(--gray-400)">No workers yet — click "+ Add Worker" to add one</td></tr>';
+    workersByName = {};
+    return;
+  }
+
+  // Keep the global cache in sync with what we just fetched
+  workersByName = {};
+  staff.forEach(w => { workersByName[w.name] = w; });
+
+  // Friendly labels for the break_rule codes stored in the database
+  const breakLabels = {
+    standard:  'Standard (30/60/90)',
+    no_break:  'No break',
+    flat_30:   'Flat 30 min',
+    extended:  'Extended (30/60)',
+    capped_45: 'Capped at 45 min'
+  };
+
+  tbody.innerHTML = '';
+  staff.forEach(w => {
+    const tr = document.createElement('tr');
+    // Dim rows for retired workers so they're visually separated
+    if (!w.active) tr.style.opacity = '0.5';
+
+    tr.innerHTML = `
+      <td><strong>${w.name}</strong></td>
+      <td>${w.role || '—'}</td>
+      <td class="td-money">${fmtMoney(w.rate)}/hr</td>
+      <td>${breakLabels[w.break_rule] || w.break_rule}</td>
+      <td>${
+        w.is_tracked === false
+          ? '<span class="chip chip-amber">Not tracked</span>'
+          : (w.tracker_id
+              ? '<span style="font-family:monospace; font-size:12px; color:var(--gray-800);">' + w.tracker_id + '</span>'
+              : '<span class="td-muted">— not set —</span>')
+      }</td>
+      <td>${w.no_7am_cap ? '✅ Yes' : '—'}</td>
+      <td>
+        <span class="chip ${w.active ? 'chip-green' : 'chip-amber'}">
+          ${w.active ? 'Active' : 'Retired'}
+        </span>
+      </td>
+      <td style="text-align:right; white-space:nowrap;">
+        <button class="btn btn-outline btn-sm" onclick="editStaff('${w.id}')">Edit</button>
+        <button class="btn btn-outline btn-sm" onclick="toggleStaffActive('${w.id}', ${w.active})" style="color:var(--amber);">
+          ${w.active ? 'Retire' : 'Reactivate'}
+        </button>
+        <button class="btn btn-outline btn-sm" onclick="deleteStaff('${w.id}', '${(w.name || '').replace(/'/g, "\\'")}')" style="color:var(--red);">Delete</button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+// ── ADD / EDIT / RETIRE / DELETE WORKER ──────────────────────
+// Tracks which worker (if any) is being edited.
+// null  = we're in "Add" mode and will insert a new row
+// uuid  = we're editing that worker and will update the existing row
+let editingStaffId = null;
+
+// Reset the form back to "Add New Worker" mode with empty fields
+function resetStaffForm() {
+  editingStaffId = null;
+  document.getElementById('staff-form-title').textContent = 'Add New Worker';
+  document.getElementById('staff-save-btn').textContent   = 'Save Worker';
+  document.getElementById('staff-cancel-btn').style.display = 'none';
+
+  document.getElementById('staff-name').value       = '';
+  document.getElementById('staff-role').value       = 'Misc';
+  document.getElementById('staff-rate').value       = '';
+  document.getElementById('staff-break-rule').value = 'standard';
+  document.getElementById('staff-tracker-id').value = '';
+  document.getElementById('staff-is-tracked').checked = true;
+  document.getElementById('staff-no-7am').checked   = false;
+  document.getElementById('staff-saturday').checked = false;
+
+  document.getElementById('staff-success').style.display = 'none';
+  document.getElementById('staff-error').style.display   = 'none';
+}
+
+// Load a worker's current data into the form so we can edit it
+async function editStaff(id) {
+  const { data: worker, error } = await sb.from('workers')
+    .select('*').eq('id', id).single();
+
+  if (error || !worker) {
+    alert('Could not load worker: ' + (error ? error.message : 'not found'));
+    return;
+  }
+
+  // Switch the form into "edit" mode
+  editingStaffId = id;
+  document.getElementById('staff-form-title').textContent = 'Edit ' + worker.name;
+  document.getElementById('staff-save-btn').textContent   = 'Update Worker';
+  document.getElementById('staff-cancel-btn').style.display = 'inline-flex';
+
+  // Fill in every field with the worker's current values
+  document.getElementById('staff-name').value       = worker.name;
+  document.getElementById('staff-role').value       = worker.role || 'Misc';
+  document.getElementById('staff-rate').value       = worker.rate;
+  document.getElementById('staff-break-rule').value = worker.break_rule || 'standard';
+  document.getElementById('staff-tracker-id').value = worker.tracker_id || '';
+  document.getElementById('staff-is-tracked').checked = worker.is_tracked !== false;
+  document.getElementById('staff-no-7am').checked   = !!worker.no_7am_cap;
+  document.getElementById('staff-saturday').checked = !!worker.saturday_rule;
+
+  document.getElementById('staff-success').style.display = 'none';
+  document.getElementById('staff-error').style.display   = 'none';
+
+  // Scroll the form into view so the user knows something happened
+  document.getElementById('staff-form-title').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+// Save handler — decides whether to insert a new worker OR update an existing one,
+// based on whether editingStaffId is set
+async function saveStaff() {
+  const name       = document.getElementById('staff-name').value.trim();
+  const role       = document.getElementById('staff-role').value.trim() || 'Misc';
+  const rate       = parseFloat(document.getElementById('staff-rate').value);
+  const breakRule  = document.getElementById('staff-break-rule').value;
+  const trackerId  = document.getElementById('staff-tracker-id').value.trim() || null;
+  const isTracked  = document.getElementById('staff-is-tracked').checked;
+  const no7amCap   = document.getElementById('staff-no-7am').checked;
+  const saturday   = document.getElementById('staff-saturday').checked;
+
+  const sucEl = document.getElementById('staff-success');
+  const errEl = document.getElementById('staff-error');
+  sucEl.style.display = 'none';
+  errEl.style.display = 'none';
+
+  if (!name) {
+    errEl.textContent = 'Please enter a name.';
+    errEl.style.display = 'flex';
+    return;
+  }
+  if (isNaN(rate) || rate <= 0) {
+    errEl.textContent = 'Please enter a valid hourly rate (greater than 0).';
+    errEl.style.display = 'flex';
+    return;
+  }
+
+  const payload = {
+    name:          name,
+    role:          role,
+    rate:          rate,
+    break_rule:    breakRule,
+    tracker_id:    trackerId,
+    is_tracked:    isTracked,
+    no_7am_cap:    no7amCap,
+    saturday_rule: saturday
+  };
+
+  let error;
+  if (editingStaffId) {
+    // UPDATE mode — change the existing row, keep its 'active' status as-is
+    ({ error } = await sb.from('workers').update(payload).eq('id', editingStaffId));
+  } else {
+    // INSERT mode — new workers are active by default
+    payload.active = true;
+    ({ error } = await sb.from('workers').insert(payload));
+  }
+
+  if (error) {
+    if (error.message && error.message.includes('duplicate')) {
+      errEl.textContent = 'A worker named "' + name + '" already exists.';
+    } else {
+      errEl.textContent = 'Could not save: ' + error.message;
+    }
+    errEl.style.display = 'flex';
+    return;
+  }
+
+  // Success — show a message, reset the form, and reload the table
+  sucEl.textContent = editingStaffId
+    ? '✅ Updated ' + name
+    : '✅ Added '   + name + ' ($' + rate.toFixed(2) + '/hr)';
+  sucEl.style.display = 'flex';
+
+  resetStaffForm();
+  loadStaff();
+}
+
+// Toggle a worker between Active and Retired — this is the "soft delete"
+async function toggleStaffActive(id, currentlyActive) {
+  const verb = currentlyActive ? 'retire' : 'reactivate';
+  if (!confirm('Are you sure you want to ' + verb + ' this worker?')) return;
+
+  const { error } = await sb.from('workers')
+    .update({ active: !currentlyActive })
+    .eq('id', id);
+
+  if (error) {
+    alert('Could not ' + verb + ' worker: ' + error.message);
+    return;
+  }
+  loadStaff();
+}
+
+// Permanently delete a worker — hard delete, double-confirmation required
+async function deleteStaff(id, name) {
+  // First confirm
+  if (!confirm('⚠️ PERMANENTLY delete ' + name + '?\n\nThis cannot be undone. For workers with payroll history, use Retire instead.')) return;
+
+  // Second confirm — make the user type the name to prevent accidents
+  const typed = prompt('To confirm, type the worker\'s full name exactly:\n\n' + name);
+  if (typed !== name) {
+    alert('Name did not match. Delete cancelled.');
+    return;
+  }
+
+  const { error } = await sb.from('workers').delete().eq('id', id);
+
+  if (error) {
+    alert('Could not delete worker: ' + error.message);
+    return;
+  }
+
+  // If we were currently editing this worker, reset the form
+  if (editingStaffId === id) resetStaffForm();
+
+  loadStaff();
+}
+
+// ── WORKER SUBMIT (public form) ───────────────────────────────
+async function submitProduction() {
+  const name     = document.getElementById('sub-name').value.trim();
+  const bol      = document.getElementById('sub-bol').value.trim();
+  const customer = document.getElementById('sub-customer').value.trim();
+  const size     = document.getElementById('sub-size').value.trim();
+  const bolQty   = parseInt(document.getElementById('sub-bol-qty').value) || 0;
+  const type     = document.getElementById('sub-type').value;
+  const qty      = parseInt(document.getElementById('sub-qty').value) || 0;
+  const date     = document.getElementById('sub-date').value;
+
+  const sucEl  = document.getElementById('submit-success');
+  const errEl  = document.getElementById('submit-error');
+  const btnText= document.getElementById('submit-btn-text');
+
+  sucEl.style.display = 'none'; errEl.style.display = 'none';
+
+  if (!name || !bol || !customer || !size || !qty || !date) {
+    errEl.textContent = 'Please fill in all fields.'; errEl.style.display = 'flex'; return;
+  }
+
+  btnText.innerHTML = '<div class="spinner" style="border-top-color:#fff"></div> Submitting...';
+
+  const workDate   = new Date(date + 'T00:00:00');
+  const submitDate = new Date();
+  const daysDiff   = Math.floor((submitDate - workDate) / (1000 * 60 * 60 * 24));
+  const isLate     = daysDiff > 7;
+
+  const { error } = await sb.from('piece_submissions').insert({
+    worker_name: name, bol_number: bol, customer_name: customer,
+    size: size, bol_qty: bolQty, prod_type: type,
+    qty: qty, work_date: date, is_late: isLate, issue: ''
+  });
+
+  if (error) {
+    errEl.textContent = 'Failed to submit: ' + error.message;
+    errEl.style.display = 'flex';
+  } else {
+    sucEl.style.display = 'flex';
+    document.getElementById('sub-name').value = '';
+    document.getElementById('sub-qty').value  = '';
+  }
+  btnText.textContent = 'Submit';
+}
+</script>
+</body>
+</html>
