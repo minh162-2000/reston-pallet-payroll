@@ -458,6 +458,15 @@
           <select id="workers-week-select" onchange="loadWorkersTab()" style="width:auto; padding:7px 12px;">
             <option value="">— Select a week —</option>
           </select>
+          <label style="margin:0 0 0 8px; font-size:13px; font-weight:600; color:var(--gray-600);">Sort by:</label>
+          <select id="workers-sort" onchange="loadWorkersTab()" style="width:auto; padding:7px 12px;">
+            <option value="name_asc">Name (A → Z)</option>
+            <option value="name_desc">Name (Z → A)</option>
+            <option value="pay_desc">Total Pay (high → low)</option>
+            <option value="pay_asc">Total Pay (low → high)</option>
+            <option value="hours_desc">Hours (most → least)</option>
+            <option value="hours_asc">Hours (least → most)</option>
+          </select>
           <!-- View toggle -->
           <div style="margin-left:auto; display:flex; gap:6px;">
             <button id="tab-detail"  class="btn btn-primary btn-sm" onclick="setWorkersView('detail')">📋 Shift Detail</button>
@@ -1392,6 +1401,39 @@ async function loadWorkersTab() {
     sb.from('worker_week_summary').select('*').eq('week_id', weekId).order('worker_name')
   ]);
 
+  // ── SORT WORKERS BASED ON DROPDOWN SELECTION ─────────────
+  // We always group shifts by worker (so subtotals keep working).
+  // The sort setting only affects the ORDER of the worker groups.
+  const sortBy = document.getElementById('workers-sort').value || 'name_asc';
+
+  if (summaries) {
+    summaries.sort((a, b) => {
+      switch (sortBy) {
+        case 'name_desc':   return b.worker_name.localeCompare(a.worker_name);
+        case 'pay_desc':    return (b.total_pay || 0) - (a.total_pay || 0);
+        case 'pay_asc':     return (a.total_pay || 0) - (b.total_pay || 0);
+        case 'hours_desc':  return (b.net_hrs   || 0) - (a.net_hrs   || 0);
+        case 'hours_asc':   return (a.net_hrs   || 0) - (b.net_hrs   || 0);
+        case 'name_asc':
+        default:            return a.worker_name.localeCompare(b.worker_name);
+      }
+    });
+  }
+
+  // Reorder shifts to match the sorted worker order. Workers without a summary row
+  // go at the end, alphabetically.
+  if (shifts && summaries) {
+    const workerOrder = {};
+    summaries.forEach((s, idx) => { workerOrder[s.worker_name] = idx; });
+    shifts.sort((a, b) => {
+      const aIdx = workerOrder[a.worker_name] !== undefined ? workerOrder[a.worker_name] : 9999;
+      const bIdx = workerOrder[b.worker_name] !== undefined ? workerOrder[b.worker_name] : 9999;
+      if (aIdx !== bIdx) return aIdx - bIdx;
+      // Same worker — keep shifts in chronological order
+      return (a.shift_date || '').localeCompare(b.shift_date || '');
+    });
+  }
+
   // ── DETAIL VIEW: shift rows ──────────────────────────────
   shiftsTbody.innerHTML = '';
   if (!shifts || shifts.length === 0) {
@@ -1494,7 +1536,11 @@ async function loadWorkersTab() {
         <td style="padding:8px 12px; color:#aaa; font-style:italic; font-size:11px;">${s.actual_in || ''}</td>
         <td style="padding:8px 12px; color:#aaa; font-style:italic; font-size:11px;">${s.actual_out || ''}</td>
         <td style="padding:8px 12px;">${(s.raw_hrs || 0).toFixed(2)}</td>
-        <td style="padding:8px 12px;">${getBreakChip(s.break_mins)}</td>
+        <td contenteditable="true"
+            style="padding:8px 12px; cursor:text; min-width:42px; border:1px solid transparent; border-radius:4px;"
+            onmouseover="this.style.borderColor='#1F3864'; this.style.background='#EBF3FF';"
+            onmouseout="this.style.borderColor='transparent'; this.style.background='';"
+            onblur="saveShiftEdit('${s.id}','break_mins',this.textContent.trim())">${getBreakChip(s.break_mins)}</td>
         <td style="padding:8px 12px;"><span style="background:#E8F5E9; color:#1E5631; font-weight:700; padding:3px 8px; border-radius:5px; font-size:12px;">${(s.net_hrs || 0).toFixed(2)}</span></td>
         <td style="padding:8px 12px; color:#555;">${runningDisplay[s.worker_name].toFixed(2)}</td>
         <td style="padding:8px 12px; color:#888;">$${(s.hourly_rate || 0).toFixed(2)}</td>
@@ -1596,29 +1642,50 @@ async function saveShiftEdit(shiftId, field, value) {
 
   // Apply the edit
   const updated = Object.assign({}, shift);
-  updated[field] = value;
 
-  // Parse the updated clock-in and clock-out
-  const inHM  = parseTime(updated.clock_in);
-  const outHM = parseTime(updated.clock_out);
-
-  if (inHM && outHM) {
-    let inMin  = toMin(inHM);
-    let outMin = toMin(outHM);
-    if (outMin <= inMin) outMin += 1440; // overnight
-
-    const rawHrs   = Math.max(0, (outMin - inMin) / 60);
-    // calcBreak needs the worker's break_rule and saturday_rule from the cache.
-    // Fall back to an empty object (which defaults to 'standard' rule) if worker isn't found.
-    const worker   = workersByName[shift.worker_name] || {};
-    const brkMins  = calcBreak(outHM, worker, new Date(shift.shift_date + 'T00:00:00'));
-    const netHrs   = Math.max(0, rawHrs - brkMins / 60);
-    const totalPay = Math.round(netHrs * (shift.hourly_rate || 0) * 100) / 100;
-
-    updated.raw_hrs    = Math.round(rawHrs * 100) / 100;
+  // ─── BRANCH 1: user edited the break minutes manually ───
+  // We trust their number and only recalc net hours + total pay.
+  if (field === 'break_mins') {
+    // Strip anything that isn't a digit (e.g. "30 min" → "30")
+    const cleaned = String(value).replace(/[^\d]/g, '');
+    const brkMins = parseInt(cleaned);
+    if (isNaN(brkMins) || brkMins < 0) {
+      alert('Please enter a whole number of minutes (e.g. 30, 45, 60).');
+      loadWorkersTab(); // reload to wipe the bad text from the cell
+      return;
+    }
     updated.break_mins = brkMins;
-    updated.net_hrs    = Math.round(netHrs * 100) / 100;
-    updated.total_pay  = totalPay;
+    // Recalc net hours using the existing raw hours minus the new break
+    const netHrs   = Math.max(0, (shift.raw_hrs || 0) - brkMins / 60);
+    const totalPay = Math.round(netHrs * (shift.hourly_rate || 0) * 100) / 100;
+    updated.net_hrs   = Math.round(netHrs * 100) / 100;
+    updated.total_pay = totalPay;
+
+  // ─── BRANCH 2: user edited a clock time ───
+  // Recalculate everything from scratch, including auto-break.
+  } else {
+    updated[field] = value;
+    const inHM  = parseTime(updated.clock_in);
+    const outHM = parseTime(updated.clock_out);
+
+    if (inHM && outHM) {
+      let inMin  = toMin(inHM);
+      let outMin = toMin(outHM);
+      if (outMin <= inMin) outMin += 1440; // overnight
+
+      const rawHrs   = Math.max(0, (outMin - inMin) / 60);
+      // calcBreak needs the worker's break_rule and saturday_rule from the cache.
+      // Fall back to an empty object (which defaults to 'standard' rule) if worker isn't found.
+      const worker   = workersByName[shift.worker_name] || {};
+      const brkMins  = calcBreak(outHM, worker, new Date(shift.shift_date + 'T00:00:00'));
+      const netHrs   = Math.max(0, rawHrs - brkMins / 60);
+      const totalPay = Math.round(netHrs * (shift.hourly_rate || 0) * 100) / 100;
+
+      updated.raw_hrs    = Math.round(rawHrs * 100) / 100;
+      updated.break_mins = brkMins;
+      updated.net_hrs    = Math.round(netHrs * 100) / 100;
+      updated.total_pay  = totalPay;
+    }
   }
 
   // Save all recalculated fields back to database
