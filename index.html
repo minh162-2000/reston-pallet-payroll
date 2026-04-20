@@ -604,27 +604,85 @@
 
       <!-- ── STAFF ── -->
       <div id="page-staff" class="page">
-        <div class="section-header">
-          <h3>Staff Roster</h3>
-          <button class="btn btn-green btn-sm" onclick="alert('Coming in Step 4')">+ Add Worker</button>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Role</th>
-                <th>Rate</th>
-                <th>Break Rule</th>
-                <th>Early Start?</th>
-                <th>Status</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody id="staff-table">
-              <tr><td colspan="7" style="padding:32px; text-align:center; color:var(--gray-400)">Loading...</td></tr>
-            </tbody>
-          </table>
+        <div class="grid-2" style="align-items:start">
+          <!-- LEFT: staff roster table -->
+          <div>
+            <div class="section-header">
+              <h3>Staff Roster</h3>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Role</th>
+                    <th>Rate</th>
+                    <th>Break Rule</th>
+                    <th>Early Start?</th>
+                    <th>Status</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="staff-table">
+                  <tr><td colspan="7" style="padding:32px; text-align:center; color:var(--gray-400)">Loading...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- RIGHT: Add worker form -->
+          <div>
+            <div class="card">
+              <div class="card-title">Add New Worker</div>
+              <div id="staff-success" class="alert alert-green" style="display:none; margin-top:12px"></div>
+              <div id="staff-error"   class="alert alert-red"   style="display:none; margin-top:12px"></div>
+
+              <div class="form-group mt-16">
+                <label>Full Name *</label>
+                <input type="text" id="staff-name" placeholder="e.g. John Smith" />
+                <div class="text-muted" style="margin-top:4px">Must match exactly how it appears in Homebase CSV</div>
+              </div>
+
+              <div class="form-group">
+                <label>Role</label>
+                <input type="text" id="staff-role" placeholder="e.g. Forklift, Cutting, Misc" value="Misc" />
+              </div>
+
+              <div class="form-group">
+                <label>Hourly Rate *</label>
+                <input type="number" id="staff-rate" placeholder="e.g. 17.60" step="0.01" min="0" />
+              </div>
+
+              <div class="form-group">
+                <label>Break Rule</label>
+                <select id="staff-break-rule">
+                  <option value="standard">Standard (30 / 60 / 90 min)</option>
+                  <option value="no_break">No break (e.g. Stan, Dylan)</option>
+                  <option value="flat_30">Flat 30 min always (e.g. Slade)</option>
+                  <option value="extended">Extended 30 / 60 (e.g. Chris, Pawel)</option>
+                  <option value="capped_45">Capped at 45 min (e.g. Rajesh)</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label style="display:flex; align-items:center; gap:8px; text-transform:none; letter-spacing:0; font-size:13px;">
+                  <input type="checkbox" id="staff-no-7am" style="width:auto; margin:0;" />
+                  <span>Exempt from 7 AM start cap</span>
+                </label>
+                <div class="text-muted" style="margin-top:4px; margin-left:24px;">Check if this worker legitimately starts before 7 AM</div>
+              </div>
+
+              <div class="form-group">
+                <label style="display:flex; align-items:center; gap:8px; text-transform:none; letter-spacing:0; font-size:13px;">
+                  <input type="checkbox" id="staff-saturday" style="width:auto; margin:0;" />
+                  <span>Saturday rule applies</span>
+                </label>
+                <div class="text-muted" style="margin-top:4px; margin-left:24px;">Chris Gruchalla's special Saturday break logic</div>
+              </div>
+
+              <button class="btn btn-green" onclick="addStaff()">Save Worker</button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1841,6 +1899,69 @@ async function loadStaff() {
     `;
     tbody.appendChild(tr);
   });
+}
+
+// ── ADD WORKER (save form to Supabase) ───────────────────────
+async function addStaff() {
+  // Grab values from every form field
+  const name       = document.getElementById('staff-name').value.trim();
+  const role       = document.getElementById('staff-role').value.trim() || 'Misc';
+  const rate       = parseFloat(document.getElementById('staff-rate').value);
+  const breakRule  = document.getElementById('staff-break-rule').value;
+  const no7amCap   = document.getElementById('staff-no-7am').checked;
+  const saturday   = document.getElementById('staff-saturday').checked;
+
+  const sucEl = document.getElementById('staff-success');
+  const errEl = document.getElementById('staff-error');
+  sucEl.style.display = 'none';
+  errEl.style.display = 'none';
+
+  // Basic validation — name and rate are required
+  if (!name) {
+    errEl.textContent = 'Please enter a name.';
+    errEl.style.display = 'flex';
+    return;
+  }
+  if (isNaN(rate) || rate <= 0) {
+    errEl.textContent = 'Please enter a valid hourly rate (greater than 0).';
+    errEl.style.display = 'flex';
+    return;
+  }
+
+  // Try to insert the new worker row
+  const { error } = await sb.from('workers').insert({
+    name:          name,
+    role:          role,
+    rate:          rate,
+    break_rule:    breakRule,
+    no_7am_cap:    no7amCap,
+    saturday_rule: saturday,
+    active:        true
+  });
+
+  if (error) {
+    // Friendly message for the most common error (duplicate name)
+    if (error.message && error.message.includes('duplicate')) {
+      errEl.textContent = 'A worker named "' + name + '" already exists.';
+    } else {
+      errEl.textContent = 'Could not save: ' + error.message;
+    }
+    errEl.style.display = 'flex';
+    return;
+  }
+
+  // Success — show confirmation, clear form, refresh the table
+  sucEl.textContent = '✅ Added ' + name + ' ($' + rate.toFixed(2) + '/hr)';
+  sucEl.style.display = 'flex';
+
+  document.getElementById('staff-name').value     = '';
+  document.getElementById('staff-role').value     = 'Misc';
+  document.getElementById('staff-rate').value     = '';
+  document.getElementById('staff-break-rule').value = 'standard';
+  document.getElementById('staff-no-7am').checked   = false;
+  document.getElementById('staff-saturday').checked = false;
+
+  loadStaff();
 }
 
 // ── WORKER SUBMIT (public form) ───────────────────────────────
