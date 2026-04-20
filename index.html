@@ -633,7 +633,7 @@
           <!-- RIGHT: Add worker form -->
           <div>
             <div class="card">
-              <div class="card-title">Add New Worker</div>
+              <div class="card-title" id="staff-form-title">Add New Worker</div>
               <div id="staff-success" class="alert alert-green" style="display:none; margin-top:12px"></div>
               <div id="staff-error"   class="alert alert-red"   style="display:none; margin-top:12px"></div>
 
@@ -680,7 +680,10 @@
                 <div class="text-muted" style="margin-top:4px; margin-left:24px;">Chris Gruchalla's special Saturday break logic</div>
               </div>
 
-              <button class="btn btn-green" onclick="addStaff()">Save Worker</button>
+              <div style="display:flex; gap:8px;">
+                <button class="btn btn-green" id="staff-save-btn" onclick="saveStaff()">Save Worker</button>
+                <button class="btn btn-outline" id="staff-cancel-btn" onclick="resetStaffForm()" style="display:none;">Cancel</button>
+              </div>
             </div>
           </div>
         </div>
@@ -1893,17 +1896,76 @@ async function loadStaff() {
           ${w.active ? 'Active' : 'Retired'}
         </span>
       </td>
-      <td style="text-align:right;">
-        <button class="btn btn-outline btn-sm" onclick="alert('Edit coming in Step 5')">Edit</button>
+      <td style="text-align:right; white-space:nowrap;">
+        <button class="btn btn-outline btn-sm" onclick="editStaff('${w.id}')">Edit</button>
+        <button class="btn btn-outline btn-sm" onclick="toggleStaffActive('${w.id}', ${w.active})" style="color:var(--amber);">
+          ${w.active ? 'Retire' : 'Reactivate'}
+        </button>
+        <button class="btn btn-outline btn-sm" onclick="deleteStaff('${w.id}', '${(w.name || '').replace(/'/g, "\\'")}')" style="color:var(--red);">Delete</button>
       </td>
     `;
     tbody.appendChild(tr);
   });
 }
 
-// ── ADD WORKER (save form to Supabase) ───────────────────────
-async function addStaff() {
-  // Grab values from every form field
+// ── ADD / EDIT / RETIRE / DELETE WORKER ──────────────────────
+// Tracks which worker (if any) is being edited.
+// null  = we're in "Add" mode and will insert a new row
+// uuid  = we're editing that worker and will update the existing row
+let editingStaffId = null;
+
+// Reset the form back to "Add New Worker" mode with empty fields
+function resetStaffForm() {
+  editingStaffId = null;
+  document.getElementById('staff-form-title').textContent = 'Add New Worker';
+  document.getElementById('staff-save-btn').textContent   = 'Save Worker';
+  document.getElementById('staff-cancel-btn').style.display = 'none';
+
+  document.getElementById('staff-name').value       = '';
+  document.getElementById('staff-role').value       = 'Misc';
+  document.getElementById('staff-rate').value       = '';
+  document.getElementById('staff-break-rule').value = 'standard';
+  document.getElementById('staff-no-7am').checked   = false;
+  document.getElementById('staff-saturday').checked = false;
+
+  document.getElementById('staff-success').style.display = 'none';
+  document.getElementById('staff-error').style.display   = 'none';
+}
+
+// Load a worker's current data into the form so we can edit it
+async function editStaff(id) {
+  const { data: worker, error } = await sb.from('workers')
+    .select('*').eq('id', id).single();
+
+  if (error || !worker) {
+    alert('Could not load worker: ' + (error ? error.message : 'not found'));
+    return;
+  }
+
+  // Switch the form into "edit" mode
+  editingStaffId = id;
+  document.getElementById('staff-form-title').textContent = 'Edit ' + worker.name;
+  document.getElementById('staff-save-btn').textContent   = 'Update Worker';
+  document.getElementById('staff-cancel-btn').style.display = 'inline-flex';
+
+  // Fill in every field with the worker's current values
+  document.getElementById('staff-name').value       = worker.name;
+  document.getElementById('staff-role').value       = worker.role || 'Misc';
+  document.getElementById('staff-rate').value       = worker.rate;
+  document.getElementById('staff-break-rule').value = worker.break_rule || 'standard';
+  document.getElementById('staff-no-7am').checked   = !!worker.no_7am_cap;
+  document.getElementById('staff-saturday').checked = !!worker.saturday_rule;
+
+  document.getElementById('staff-success').style.display = 'none';
+  document.getElementById('staff-error').style.display   = 'none';
+
+  // Scroll the form into view so the user knows something happened
+  document.getElementById('staff-form-title').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+// Save handler — decides whether to insert a new worker OR update an existing one,
+// based on whether editingStaffId is set
+async function saveStaff() {
   const name       = document.getElementById('staff-name').value.trim();
   const role       = document.getElementById('staff-role').value.trim() || 'Misc';
   const rate       = parseFloat(document.getElementById('staff-rate').value);
@@ -1916,7 +1978,6 @@ async function addStaff() {
   sucEl.style.display = 'none';
   errEl.style.display = 'none';
 
-  // Basic validation — name and rate are required
   if (!name) {
     errEl.textContent = 'Please enter a name.';
     errEl.style.display = 'flex';
@@ -1928,19 +1989,26 @@ async function addStaff() {
     return;
   }
 
-  // Try to insert the new worker row
-  const { error } = await sb.from('workers').insert({
+  const payload = {
     name:          name,
     role:          role,
     rate:          rate,
     break_rule:    breakRule,
     no_7am_cap:    no7amCap,
-    saturday_rule: saturday,
-    active:        true
-  });
+    saturday_rule: saturday
+  };
+
+  let error;
+  if (editingStaffId) {
+    // UPDATE mode — change the existing row, keep its 'active' status as-is
+    ({ error } = await sb.from('workers').update(payload).eq('id', editingStaffId));
+  } else {
+    // INSERT mode — new workers are active by default
+    payload.active = true;
+    ({ error } = await sb.from('workers').insert(payload));
+  }
 
   if (error) {
-    // Friendly message for the most common error (duplicate name)
     if (error.message && error.message.includes('duplicate')) {
       errEl.textContent = 'A worker named "' + name + '" already exists.';
     } else {
@@ -1950,16 +2018,53 @@ async function addStaff() {
     return;
   }
 
-  // Success — show confirmation, clear form, refresh the table
-  sucEl.textContent = '✅ Added ' + name + ' ($' + rate.toFixed(2) + '/hr)';
+  // Success — show a message, reset the form, and reload the table
+  sucEl.textContent = editingStaffId
+    ? '✅ Updated ' + name
+    : '✅ Added '   + name + ' ($' + rate.toFixed(2) + '/hr)';
   sucEl.style.display = 'flex';
 
-  document.getElementById('staff-name').value     = '';
-  document.getElementById('staff-role').value     = 'Misc';
-  document.getElementById('staff-rate').value     = '';
-  document.getElementById('staff-break-rule').value = 'standard';
-  document.getElementById('staff-no-7am').checked   = false;
-  document.getElementById('staff-saturday').checked = false;
+  resetStaffForm();
+  loadStaff();
+}
+
+// Toggle a worker between Active and Retired — this is the "soft delete"
+async function toggleStaffActive(id, currentlyActive) {
+  const verb = currentlyActive ? 'retire' : 'reactivate';
+  if (!confirm('Are you sure you want to ' + verb + ' this worker?')) return;
+
+  const { error } = await sb.from('workers')
+    .update({ active: !currentlyActive })
+    .eq('id', id);
+
+  if (error) {
+    alert('Could not ' + verb + ' worker: ' + error.message);
+    return;
+  }
+  loadStaff();
+}
+
+// Permanently delete a worker — hard delete, double-confirmation required
+async function deleteStaff(id, name) {
+  // First confirm
+  if (!confirm('⚠️ PERMANENTLY delete ' + name + '?\n\nThis cannot be undone. For workers with payroll history, use Retire instead.')) return;
+
+  // Second confirm — make the user type the name to prevent accidents
+  const typed = prompt('To confirm, type the worker\'s full name exactly:\n\n' + name);
+  if (typed !== name) {
+    alert('Name did not match. Delete cancelled.');
+    return;
+  }
+
+  const { error } = await sb.from('workers').delete().eq('id', id);
+
+  if (error) {
+    alert('Could not delete worker: ' + error.message);
+    return;
+  }
+
+  // If we were currently editing this worker, reset the form
+  if (editingStaffId === id) resetStaffForm();
 
   loadStaff();
 }
