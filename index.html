@@ -1454,13 +1454,77 @@ async function loadWorkersTab() {
 
 // Save edits to clock-in/out back to Supabase
 async function saveShiftEdit(shiftId, field, value) {
-  const update = {};
-  update[field] = value;
-  const { error } = await sb.from('hourly_shifts').update(update).eq('id', shiftId);
+  // First get the full shift so we can recalculate everything
+  const { data: shift } = await sb.from('hourly_shifts').select('*').eq('id', shiftId).single();
+  if (!shift) return;
+
+  // Apply the edit
+  const updated = Object.assign({}, shift);
+  updated[field] = value;
+
+  // Parse the updated clock-in and clock-out
+  const inHM  = parseTime(updated.clock_in);
+  const outHM = parseTime(updated.clock_out);
+
+  if (inHM && outHM) {
+    let inMin  = toMin(inHM);
+    let outMin = toMin(outHM);
+    if (outMin <= inMin) outMin += 1440; // overnight
+
+    const rawHrs   = Math.max(0, (outMin - inMin) / 60);
+    const brkMins  = calcBreak(outHM, shift.worker_name, new Date(shift.shift_date + 'T00:00:00'));
+    const netHrs   = Math.max(0, rawHrs - brkMins / 60);
+    const totalPay = Math.round(netHrs * (shift.hourly_rate || 0) * 100) / 100;
+
+    updated.raw_hrs    = Math.round(rawHrs * 100) / 100;
+    updated.break_mins = brkMins;
+    updated.net_hrs    = Math.round(netHrs * 100) / 100;
+    updated.total_pay  = totalPay;
+  }
+
+  // Save all recalculated fields back to database
+  const { error } = await sb.from('hourly_shifts').update({
+    clock_in:   updated.clock_in,
+    clock_out:  updated.clock_out,
+    raw_hrs:    updated.raw_hrs,
+    break_mins: updated.break_mins,
+    net_hrs:    updated.net_hrs,
+    total_pay:  updated.total_pay
+  }).eq('id', shiftId);
+
   if (error) {
     alert('Could not save: ' + error.message);
+    return;
   }
-  // Reload to recalculate
+
+  // Also update the worker_week_summary totals for this worker
+  const weekId = shift.week_id;
+  if (weekId) {
+    const { data: allShifts } = await sb.from('hourly_shifts')
+      .select('net_hrs, total_pay, clock_in, actual_in')
+      .eq('week_id', weekId)
+      .eq('worker_name', shift.worker_name);
+
+    if (allShifts) {
+      const totalNetHrs = allShifts.reduce((s, r) => s + (r.net_hrs || 0), 0);
+      const totalPay    = allShifts.reduce((s, r) => s + (r.total_pay || 0), 0);
+      // Count late days — clock in after 7:00am actual time
+      let lateDays = 0;
+      allShifts.forEach(r => {
+        const hm = parseTime(r.actual_in || r.clock_in);
+        if (hm && (hm.h > 7 || (hm.h === 7 && hm.m > 0))) lateDays++;
+      });
+
+      await sb.from('worker_week_summary').update({
+        net_hrs:    Math.round(totalNetHrs * 100) / 100,
+        hourly_pay: Math.round(totalPay    * 100) / 100,
+        total_pay:  Math.round(totalPay    * 100) / 100,
+        late_days:  lateDays
+      }).eq('week_id', weekId).eq('worker_name', shift.worker_name);
+    }
+  }
+
+  // Reload tab to show updated values
   loadWorkersTab();
 }
 
