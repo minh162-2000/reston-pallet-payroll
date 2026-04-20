@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Reston Pallet — Payroll</title>
 <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
   :root {
     --navy: #1F3864;
@@ -386,7 +387,7 @@
         <div class="grid-2" style="align-items:start">
           <div>
             <div class="card mb-16">
-              <div class="card-title">Step 1 — Import Homebase CSV</div>
+              <div class="card-title">Step 1 — Homebase CSV</div>
               <p class="text-muted" style="margin: 8px 0 12px">Export CSV from Homebase Timesheets, then drag the file below — or paste directly</p>
 
               <!-- Drop zone -->
@@ -422,6 +423,30 @@
                   <span id="run-btn-text">🚀 Run Payroll</span>
                 </button>
               </div>
+            </div>
+
+            <div class="card mt-16">
+              <div class="card-title">Step 3 — Tracker File <span style="font-weight:400; text-transform:none; letter-spacing:0; color:var(--gray-400); font-size:11px;">(optional, runs independently)</span></div>
+              <p class="text-muted" style="margin: 8px 0 12px">Upload the tracker .xlsx to add Floor/Zone times and late-to-station flags on the Hourly page.</p>
+
+              <!-- Drop zone for tracker xlsx -->
+              <div id="tracker-drop-zone" onclick="document.getElementById('tracker-file').click()" style="
+                border: 2px dashed var(--gray-200); border-radius: 10px;
+                padding: 24px; text-align: center; cursor: pointer;
+                background: var(--gray-50); transition: all 0.2s; margin-bottom: 12px;">
+                <div style="font-size: 28px; margin-bottom: 6px;">📡</div>
+                <div style="font-size: 13px; font-weight: 600; color: var(--navy);" id="tracker-drop-label">Drop tracker .xlsx file here</div>
+                <div style="font-size: 11px; color: var(--gray-400); margin-top: 3px;">or click to browse</div>
+                <input type="file" id="tracker-file" accept=".xlsx,.xls" style="display:none" onchange="handleTrackerFileSelect(event)" />
+              </div>
+
+              <div id="tracker-info"    class="alert alert-navy"  style="display:none; margin-top:8px"></div>
+              <div id="tracker-error"   class="alert alert-red"   style="display:none; margin-top:8px"></div>
+              <div id="tracker-success" class="alert alert-green" style="display:none; margin-top:8px"></div>
+
+              <button class="btn btn-primary" id="tracker-btn" onclick="processTracker()" disabled style="margin-top:12px;">
+                <span id="tracker-btn-text">Process Tracker File</span>
+              </button>
             </div>
           </div>
           <div>
@@ -996,7 +1021,93 @@ document.addEventListener('DOMContentLoaded', function() {
   });
 });
 
-function detectWeek() {
+// ── TRACKER FILE HANDLERS ─────────────────────────────────────
+// Stores the selected tracker file so processTracker() can access it
+let trackerFile = null;
+
+function handleTrackerFileSelect(event) {
+  const file = event.target.files[0];
+  if (file) loadTrackerFile(file);
+}
+
+function loadTrackerFile(file) {
+  // Basic extension check — xlsx or xls only
+  if (!/\.xls[x]?$/i.test(file.name)) {
+    alert('Please select an Excel file (.xlsx or .xls).');
+    return;
+  }
+  trackerFile = file;
+
+  // Update the drop zone label so it's obvious a file is loaded
+  document.getElementById('tracker-drop-label').textContent = '✅ ' + file.name + ' loaded';
+  document.getElementById('tracker-drop-zone').style.borderColor = 'var(--green)';
+  document.getElementById('tracker-drop-zone').style.background  = 'var(--green-light)';
+
+  // Enable the Process button
+  document.getElementById('tracker-btn').disabled = false;
+
+  // Clear any previous result messages
+  document.getElementById('tracker-info').style.display    = 'none';
+  document.getElementById('tracker-error').style.display   = 'none';
+  document.getElementById('tracker-success').style.display = 'none';
+}
+
+// Register drag-and-drop for the tracker zone (runs after DOM loads)
+document.addEventListener('DOMContentLoaded', function() {
+  const zone = document.getElementById('tracker-drop-zone');
+  if (!zone) return;
+
+  zone.addEventListener('dragover', function(e) {
+    e.preventDefault();
+    zone.style.borderColor = 'var(--navy)';
+    zone.style.background  = '#EBF3FF';
+  });
+
+  zone.addEventListener('dragleave', function() {
+    // Keep green styling if a file is already loaded, else revert to gray
+    if (trackerFile) {
+      zone.style.borderColor = 'var(--green)';
+      zone.style.background  = 'var(--green-light)';
+    } else {
+      zone.style.borderColor = 'var(--gray-200)';
+      zone.style.background  = 'var(--gray-50)';
+    }
+  });
+
+  zone.addEventListener('drop', function(e) {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (file) loadTrackerFile(file);
+  });
+});
+
+// Placeholder — real parser arrives in Step 3b
+async function processTracker() {
+  const infoEl = document.getElementById('tracker-info');
+  const errEl  = document.getElementById('tracker-error');
+  const sucEl  = document.getElementById('tracker-success');
+  infoEl.style.display = 'none';
+  errEl.style.display  = 'none';
+  sucEl.style.display  = 'none';
+
+  if (!trackerFile) {
+    errEl.textContent = 'Please drop a tracker file first.';
+    errEl.style.display = 'flex';
+    return;
+  }
+
+  // Quick sanity check — confirm SheetJS library loaded successfully
+  if (typeof XLSX === 'undefined') {
+    errEl.textContent = 'Excel reader library did not load. Check your internet connection and reload the page.';
+    errEl.style.display = 'flex';
+    return;
+  }
+
+  infoEl.textContent = 'File ready: ' + trackerFile.name + ' (' + Math.round(trackerFile.size / 1024) + ' KB). Parser coming in next step.';
+  infoEl.style.display = 'flex';
+}
+
+
   const csv = document.getElementById('csv-input').value.trim();
   if (!csv) { alert('Please paste CSV data first.'); return; }
 
