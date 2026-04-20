@@ -1119,14 +1119,25 @@ async function processTracker() {
     // 1) Read the xlsx file into a 2D array of cell values
     const arrayBuf = await trackerFile.arrayBuffer();
     const wb       = XLSX.read(arrayBuf, { type: 'array', cellDates: true });
+    console.log('[Tracker] Workbook sheets:', wb.SheetNames);
     const sheet    = wb.Sheets[wb.SheetNames[0]];
     // header: 1 = return as rows/arrays (no auto-detected headers)
     // defval: null = empty cells become null instead of being skipped
     const rows     = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: true });
+    console.log('[Tracker] Total rows read:', rows.length);
+    console.log('[Tracker] First 8 rows:', rows.slice(0, 8));
+    console.log('[Tracker] Sample row 4 (should be first data row):', rows[4]);
+    if (rows[4]) {
+      console.log('[Tracker] Row 4 col 0 type:', typeof rows[4][0], 'value:', rows[4][0]);
+      console.log('[Tracker] Row 4 col 2 type:', typeof rows[4][2], 'value:', rows[4][2]);
+      console.log('[Tracker] Row 4 col 2 instanceof Date?', rows[4][2] instanceof Date);
+    }
 
     // 2) Walk the rows, collecting worker+date → aggregated zone data
     const trackerMap  = parseTrackerRows(rows);
     const trackerKeys = Object.keys(trackerMap);
+    console.log('[Tracker] Parsed keys count:', trackerKeys.length);
+    console.log('[Tracker] First 3 keys:', trackerKeys.slice(0, 3));
 
     if (trackerKeys.length === 0) {
       errEl.textContent = 'No tracker data found in this file. Make sure it has the expected Name/Zone/Start/End layout.';
@@ -1793,6 +1804,14 @@ function setWorkersView(view) {
   document.getElementById('tab-summary').className = isDetail ? 'btn btn-outline btn-sm' : 'btn btn-primary btn-sm';
 }
 
+// Toggles visibility of the tracker detail row underneath a shift
+// Called from the onclick handler on status chips
+function toggleTrackerDetail(shiftId) {
+  const row = document.getElementById('tr-' + shiftId);
+  if (!row) return;
+  row.style.display = (row.style.display === 'none' || !row.style.display) ? 'table-row' : 'none';
+}
+
 async function loadWorkersTab() {
   const weekId = document.getElementById('workers-week-select').value;
   const shiftsTbody  = document.getElementById('shifts-table');
@@ -1804,11 +1823,25 @@ async function loadWorkersTab() {
     return;
   }
 
-  // Load both shifts and summary in parallel
-  const [{ data: shifts }, { data: summaries }] = await Promise.all([
+  // Load shifts, summary, AND tracker data in parallel — all keyed on the week
+  // Get the week's date range first so we can fetch tracker_shifts (which is keyed by date, not week_id)
+  const { data: weekRow } = await sb.from('week_periods').select('week_start, week_end').eq('id', weekId).single();
+  const weekStart = weekRow ? weekRow.week_start : null;
+  const weekEnd   = weekRow ? weekRow.week_end   : null;
+
+  const [{ data: shifts }, { data: summaries }, trackerResult] = await Promise.all([
     sb.from('hourly_shifts').select('*').eq('week_id', weekId).order('worker_name').order('shift_date'),
-    sb.from('worker_week_summary').select('*').eq('week_id', weekId).order('worker_name')
+    sb.from('worker_week_summary').select('*').eq('week_id', weekId).order('worker_name'),
+    weekStart && weekEnd
+      ? sb.from('tracker_shifts').select('*').gte('shift_date', weekStart).lte('shift_date', weekEnd)
+      : Promise.resolve({ data: [] })
   ]);
+
+  // Build lookup: "worker_name|2026-04-15" → tracker row
+  const trackerLookup = {};
+  (trackerResult.data || []).forEach(t => {
+    trackerLookup[t.worker_name + '|' + t.shift_date] = t;
+  });
 
   // ── POPULATE WORKER FILTER DROPDOWN ──────────────────────
   // Only show workers who actually have shifts this week
@@ -1856,6 +1889,58 @@ async function loadWorkersTab() {
       if (mins >= 90) return '<span style="background:#FFE0E0; color:#C00000; font-weight:700; padding:3px 8px; border-radius:5px; font-size:11px;">' + mins + '</span>';
       if (mins >= 60) return '<span style="background:#FFF0E0; color:#E05000; font-weight:700; padding:3px 8px; border-radius:5px; font-size:11px;">' + mins + '</span>';
       return '<span style="background:#FFFDE7; color:#856a00; font-weight:700; padding:3px 8px; border-radius:5px; font-size:11px;">' + mins + '</span>';
+    }
+
+    // Renders the tracker status chip — 🟢🟡🔴 — next to a worker's name
+    // Clicking it toggles the Floor/Zone detail row underneath (id = 'tr-' + shiftId)
+    function getTrackerChip(tracker, shiftId) {
+      if (!tracker) return '';   // no tracker data for this worker-day → no chip
+      const s = tracker.status;
+      let bg, fg, emoji, short;
+      if (s === 'on_time')           { bg='#E8F5E9'; fg='#1E5631'; emoji='🟢'; short='On time'; }
+      else if (s === 'late_yellow')  { bg='#FFF3CC'; fg='#9A6C00'; emoji='🟡'; short='Late ' + (tracker.zone_diff_in || 0) + 'm'; }
+      else if (s === 'early_yellow') { bg='#FFF3CC'; fg='#9A6C00'; emoji='🟡'; short='Early ' + Math.abs(tracker.zone_diff_out || 0) + 'm'; }
+      else if (s === 'both_yellow')  { bg='#FFF3CC'; fg='#9A6C00'; emoji='🟡'; short='Late + Early'; }
+      else if (s === 'late_red')     { bg='#FCE4D6'; fg='#C0392B'; emoji='🔴'; short='Late ' + (tracker.zone_diff_in || 0) + 'm'; }
+      else if (s === 'early_red')    { bg='#FCE4D6'; fg='#C0392B'; emoji='🔴'; short='Left ' + Math.abs(tracker.zone_diff_out || 0) + 'm early'; }
+      else if (s === 'both_red')     { bg='#FCE4D6'; fg='#C0392B'; emoji='🔴'; short='Late + Early'; }
+      else                           { bg='#f0f0f0'; fg='#888';    emoji='⚪'; short=s || ''; }
+      return '<span onclick="toggleTrackerDetail(\'' + shiftId + '\'); event.stopPropagation();" '
+           + 'title="Click to see Floor/Zone details" '
+           + 'style="display:inline-block; margin-top:3px; padding:2px 8px; border-radius:10px; background:' + bg + '; color:' + fg + '; font-size:10px; font-weight:700; cursor:pointer; user-select:none;">'
+           + emoji + ' ' + short + ' ▾</span>';
+    }
+
+    // Renders the expanded Floor/Zone detail row — shown when user clicks the chip
+    function getTrackerDetailRow(tracker, shiftId) {
+      if (!tracker) return '';
+      function fmt(iso) {
+        if (!iso) return '—';
+        const d = new Date(iso);
+        let h = d.getHours(), m = d.getMinutes();
+        const ap = h >= 12 ? 'pm' : 'am';
+        h = h % 12 || 12;
+        return h + ':' + String(m).padStart(2, '0') + ap;
+      }
+      const floorIn  = fmt(tracker.floor_first);
+      const floorOut = fmt(tracker.floor_last);
+      const zoneIn   = fmt(tracker.top_zone_first);
+      const zoneOut  = fmt(tracker.top_zone_last);
+      const topZone  = tracker.top_zone || '—';
+      const topMins  = tracker.top_zone_minutes || 0;
+      const diffIn   = tracker.zone_diff_in  !== null ? tracker.zone_diff_in  : '—';
+      const diffOut  = tracker.zone_diff_out !== null ? tracker.zone_diff_out : '—';
+      const fDiffIn  = tracker.floor_diff_in  !== null ? tracker.floor_diff_in  : '—';
+      const fDiffOut = tracker.floor_diff_out !== null ? tracker.floor_diff_out : '—';
+      return '<tr id="tr-' + shiftId + '" class="tracker-detail-row" data-sub="1" style="display:none; background:#F8FBFF;">'
+           + '<td colspan="13" style="padding:10px 14px 10px 60px; font-size:11px; color:#333; border-bottom:1px solid #E3EEFB;">'
+           + '<div style="display:flex; gap:24px; flex-wrap:wrap;">'
+           + '<div><span style="color:#888; font-weight:600;">FLOOR:</span> ' + floorIn + ' → ' + floorOut
+           + ' <span style="color:#888;">(baseline diff: ' + fDiffIn + 'm in / ' + fDiffOut + 'm out)</span></div>'
+           + '<div><span style="color:#888; font-weight:600;">TOP ZONE:</span> <strong>' + topZone + '</strong> ' + zoneIn + ' → ' + zoneOut
+           + ' (' + topMins + 'm) <span style="color:#888;">(baseline diff: ' + diffIn + 'm in / ' + diffOut + 'm out)</span></div>'
+           + '</div>'
+           + '</td></tr>';
     }
 
     filteredShifts.forEach((s, i) => {
@@ -1907,19 +1992,25 @@ async function loadWorkersTab() {
       const worker = workersByName[s.worker_name] || {};
       const role   = worker.role || '';
 
+      // Look up tracker data for this shift (if any)
+      const tracker = trackerLookup[s.worker_name + '|' + s.shift_date] || null;
+      const isRedFlag = tracker && tracker.status && tracker.status.indexOf('red') !== -1;
+
       // Worker cell — show avatar + name + role badge on first row, empty on subsequent rows
+      // The tracker status chip (if any) sits under the role badge per-row
       const workerCell = isNewWorker
         ? `<div style="display:flex; align-items:center; gap:8px;">
              <div style="width:30px; height:30px; border-radius:50%; background:${color}; display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; color:#fff; flex-shrink:0;">${getInitials(s.worker_name)}</div>
              <div>
                <div style="font-weight:700; font-size:13px; color:#1F3864;">${s.worker_name}</div>
                ${role ? '<span style="font-size:10px; font-weight:600; padding:2px 7px; border-radius:10px; background:#EBF3FF; color:#185FA5; display:inline-block; margin-top:2px;">' + role + '</span>' : ''}
+               ${tracker ? '<div style="margin-top:3px;">' + getTrackerChip(tracker, s.id) + '</div>' : ''}
              </div>
            </div>`
-        : '';
+        : (tracker ? '<div style="padding-left:38px;">' + getTrackerChip(tracker, s.id) + '</div>' : '');
 
       tr.innerHTML = `
-        <td style="padding:8px 14px;">${workerCell}</td>
+        <td style="padding:8px 14px; ${isRedFlag ? 'background:#FFF5F0;' : ''}">${workerCell}</td>
         <td style="padding:8px 12px; white-space:nowrap;">${dateStr}</td>
         <td style="padding:8px 12px; color:#888;">${s.day_name || ''}</td>
         <td contenteditable="true"
@@ -1946,6 +2037,12 @@ async function loadWorkersTab() {
         <td style="padding:8px 12px; color:#1E5631; font-weight:700;">${fmtMoney(s.total_pay)}</td>
       `;
       shiftsTbody.appendChild(tr);
+
+      // Append the tracker detail row (hidden by default; click the chip to show it)
+      if (tracker) {
+        shiftsTbody.insertAdjacentHTML('beforeend', getTrackerDetailRow(tracker, s.id));
+      }
+
       prevWorker = s.worker_name;
     });
 
