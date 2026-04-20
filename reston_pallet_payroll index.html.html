@@ -1,0 +1,1722 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reston Pallet — Payroll</title>
+<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+<style>
+  :root {
+    --navy: #1F3864;
+    --green: #1E5631;
+    --green-light: #E8F5E9;
+    --purple: #7B2D8B;
+    --purple-light: #F3E0FF;
+    --red: #C00000;
+    --red-light: #FFE0E0;
+    --amber: #F59E0B;
+    --amber-light: #FFFDE7;
+    --gray-50: #F8F9FA;
+    --gray-100: #F1F3F4;
+    --gray-200: #E8EAED;
+    --gray-400: #9AA0A6;
+    --gray-600: #5F6368;
+    --gray-800: #3C4043;
+    --white: #FFFFFF;
+    --sidebar-w: 220px;
+    --font: 'Segoe UI', system-ui, sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: var(--font); background: var(--gray-50); color: var(--gray-800); min-height: 100vh; }
+
+  /* ── LAYOUT ── */
+  #app { display: flex; min-height: 100vh; }
+  #sidebar {
+    width: var(--sidebar-w); background: var(--navy); color: #fff;
+    display: flex; flex-direction: column; position: fixed;
+    top: 0; left: 0; height: 100vh; z-index: 100;
+  }
+  #main { margin-left: var(--sidebar-w); flex: 1; display: flex; flex-direction: column; }
+
+  /* ── SIDEBAR ── */
+  .sidebar-logo {
+    padding: 20px 16px 16px;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+  }
+  .sidebar-logo h1 { font-size: 13px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: #fff; }
+  .sidebar-logo p  { font-size: 11px; color: rgba(255,255,255,0.5); margin-top: 2px; }
+
+  .nav-section { padding: 12px 0 4px; }
+  .nav-label { font-size: 10px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: rgba(255,255,255,0.4); padding: 0 16px 6px; }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 16px; cursor: pointer; font-size: 13px;
+    color: rgba(255,255,255,0.7); border-left: 3px solid transparent;
+    transition: all 0.15s;
+  }
+  .nav-item:hover { background: rgba(255,255,255,0.08); color: #fff; }
+  .nav-item.active { background: rgba(255,255,255,0.12); color: #fff; border-left-color: #4CAF50; }
+  .nav-item .icon { font-size: 16px; width: 20px; text-align: center; }
+
+  .sidebar-bottom {
+    margin-top: auto; padding: 16px;
+    border-top: 1px solid rgba(255,255,255,0.1);
+    font-size: 12px; color: rgba(255,255,255,0.5);
+  }
+  .logout-btn {
+    display: block; width: 100%; padding: 8px; margin-top: 8px;
+    background: rgba(255,255,255,0.1); border: none; color: rgba(255,255,255,0.8);
+    border-radius: 6px; cursor: pointer; font-size: 12px; font-family: var(--font);
+  }
+  .logout-btn:hover { background: rgba(255,255,255,0.2); }
+
+  /* ── TOPBAR ── */
+  #topbar {
+    background: var(--white); border-bottom: 1px solid var(--gray-200);
+    padding: 0 24px; height: 56px; display: flex; align-items: center;
+    justify-content: space-between; position: sticky; top: 0; z-index: 50;
+  }
+  #topbar h2 { font-size: 16px; font-weight: 600; color: var(--navy); }
+  .topbar-right { display: flex; align-items: center; gap: 12px; }
+  .badge { font-size: 11px; padding: 3px 10px; border-radius: 20px; font-weight: 600; }
+  .badge-green { background: var(--green-light); color: var(--green); }
+  .badge-red   { background: var(--red-light);   color: var(--red); }
+  .badge-amber { background: var(--amber-light);  color: #92400E; }
+
+  /* ── PAGE CONTENT ── */
+  #content { padding: 24px; flex: 1; }
+
+  /* ── CARDS ── */
+  .card {
+    background: var(--white); border-radius: 10px;
+    border: 1px solid var(--gray-200); padding: 20px;
+  }
+  .card-title { font-size: 13px; font-weight: 600; color: var(--gray-600); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .stat-card { background: var(--white); border-radius: 10px; border: 1px solid var(--gray-200); padding: 16px 20px; }
+  .stat-label { font-size: 12px; color: var(--gray-400); font-weight: 500; margin-bottom: 6px; }
+  .stat-value { font-size: 26px; font-weight: 700; color: var(--navy); }
+  .stat-sub   { font-size: 11px; color: var(--gray-400); margin-top: 4px; }
+
+  /* ── TABLES ── */
+  .table-wrap { overflow-x: auto; border-radius: 10px; border: 1px solid var(--gray-200); }
+  table { width: 100%; border-collapse: collapse; background: var(--white); font-size: 13px; }
+  thead th { background: var(--navy); color: #fff; padding: 11px 14px; text-align: left; font-size: 11px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; white-space: nowrap; }
+  tbody tr { border-bottom: 1px solid var(--gray-100); transition: background 0.1s; }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: var(--gray-50); }
+  tbody td { padding: 10px 14px; color: var(--gray-800); }
+  .td-money { font-weight: 600; color: var(--green); font-variant-numeric: tabular-nums; }
+  .td-hrs   { font-weight: 600; color: var(--navy); }
+  .td-flag  { font-size: 16px; text-align: center; }
+  .td-muted { color: var(--gray-400); font-style: italic; font-size: 12px; }
+
+  /* ── BUTTONS ── */
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 9px 18px; border-radius: 7px; font-size: 13px; font-weight: 600; cursor: pointer; border: none; font-family: var(--font); transition: all 0.15s; }
+  .btn-primary { background: var(--navy); color: #fff; }
+  .btn-primary:hover { background: #162a4e; }
+  .btn-green  { background: var(--green); color: #fff; }
+  .btn-green:hover { background: #155227; }
+  .btn-outline { background: transparent; color: var(--navy); border: 1px solid var(--gray-200); }
+  .btn-outline:hover { background: var(--gray-50); }
+  .btn-danger { background: var(--red); color: #fff; }
+  .btn-sm { padding: 5px 12px; font-size: 12px; }
+
+  /* ── FORMS ── */
+  .form-group { margin-bottom: 16px; }
+  label { display: block; font-size: 12px; font-weight: 600; color: var(--gray-600); margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.4px; }
+  input, select, textarea {
+    width: 100%; padding: 9px 12px; border: 1px solid var(--gray-200);
+    border-radius: 7px; font-size: 13px; font-family: var(--font);
+    background: var(--white); color: var(--gray-800);
+    transition: border-color 0.15s;
+  }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--navy); }
+  textarea { min-height: 120px; resize: vertical; }
+
+  /* ── ALERTS ── */
+  .alert { padding: 12px 16px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; display: flex; align-items: flex-start; gap: 10px; }
+  .alert-red    { background: var(--red-light);   border-left: 4px solid var(--red);   color: #7B0000; }
+  .alert-green  { background: var(--green-light);  border-left: 4px solid var(--green);  color: #1B5E20; }
+  .alert-amber  { background: var(--amber-light);  border-left: 4px solid var(--amber);  color: #78350F; }
+  .alert-navy   { background: #EBF3FF; border-left: 4px solid var(--navy); color: var(--navy); }
+
+  /* ── LOGIN PAGE ── */
+  #login-page {
+    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, var(--navy) 0%, #2d4e8a 100%);
+  }
+  .login-box { background: var(--white); border-radius: 14px; padding: 40px; width: 380px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
+  .login-logo { text-align: center; margin-bottom: 32px; }
+  .login-logo h1 { font-size: 20px; font-weight: 800; color: var(--navy); }
+  .login-logo p  { font-size: 12px; color: var(--gray-400); margin-top: 4px; }
+  .login-logo .icon { font-size: 40px; margin-bottom: 12px; }
+
+  /* ── MISC ── */
+  .page { display: none; }
+  .page.active { display: block; }
+  .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  .section-header h3 { font-size: 15px; font-weight: 700; color: var(--navy); }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+  .mt-16 { margin-top: 16px; }
+  .mt-24 { margin-top: 24px; }
+  .mb-16 { margin-bottom: 16px; }
+  .text-muted { color: var(--gray-400); font-size: 12px; }
+  .divider { border: none; border-top: 1px solid var(--gray-200); margin: 20px 0; }
+  .chip { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+  .chip-green  { background: var(--green-light);  color: var(--green); }
+  .chip-purple { background: var(--purple-light); color: var(--purple); }
+  .chip-red    { background: var(--red-light);    color: var(--red); }
+  .chip-amber  { background: var(--amber-light);  color: #92400E; }
+  .spinner { display: inline-block; width: 18px; height: 18px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .empty-state { text-align: center; padding: 48px 24px; color: var(--gray-400); }
+  .empty-state .icon { font-size: 40px; margin-bottom: 12px; }
+  .empty-state p { font-size: 14px; }
+
+  /* ── PERFORMANCE BARS ── */
+  .perf-bar-wrap { background: var(--gray-100); border-radius: 4px; height: 8px; flex: 1; }
+  .perf-bar { height: 8px; border-radius: 4px; background: var(--green); transition: width 0.5s; }
+
+  /* ── QR SUBMIT (public page) ── */
+  #submit-page {
+    min-height: 100vh; background: var(--gray-50);
+    display: flex; align-items: center; justify-content: center; padding: 24px;
+  }
+  .submit-box { background: var(--white); border-radius: 14px; padding: 32px; width: 100%; max-width: 420px; box-shadow: 0 4px 24px rgba(0,0,0,0.08); }
+  .submit-box h2 { font-size: 18px; font-weight: 700; color: var(--navy); margin-bottom: 4px; }
+  .submit-box .sub { font-size: 13px; color: var(--gray-400); margin-bottom: 24px; }
+
+  @media (max-width: 768px) {
+    #sidebar { transform: translateX(-100%); }
+    #main { margin-left: 0; }
+    .grid-2, .grid-3 { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════════════════════
+     LOGIN PAGE
+══════════════════════════════════════════════════════════ -->
+<div id="login-page">
+  <div class="login-box">
+    <div class="login-logo">
+      <div class="icon">🏭</div>
+      <h1>Reston Pallet</h1>
+      <p>Payroll Management System</p>
+    </div>
+    <div id="login-error" class="alert alert-red" style="display:none"></div>
+    <div class="form-group">
+      <label>Email</label>
+      <input type="email" id="login-email" placeholder="your@email.com" />
+    </div>
+    <div class="form-group">
+      <label>Password</label>
+      <input type="password" id="login-password" placeholder="••••••••" />
+    </div>
+    <button class="btn btn-primary" style="width:100%; justify-content:center; margin-top:8px;" onclick="login()">
+      <span id="login-btn-text">Sign In</span>
+    </button>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     WORKER SUBMIT PAGE (public — no login)
+══════════════════════════════════════════════════════════ -->
+<div id="submit-page" style="display:none">
+  <div class="submit-box">
+    <h2>📦 Production Entry</h2>
+    <p class="sub">Reston Pallet Solutions — Submit your production for today</p>
+    <div id="submit-success" class="alert alert-green" style="display:none">✅ Submitted successfully! You can close this page.</div>
+    <div id="submit-error" class="alert alert-red" style="display:none"></div>
+    <div class="form-group">
+      <label>Your Name</label>
+      <input type="text" id="sub-name" placeholder="Full name" />
+    </div>
+    <div class="form-group">
+      <label>BOL Number</label>
+      <input type="text" id="sub-bol" placeholder="e.g. 130841" />
+    </div>
+    <div class="form-group">
+      <label>Customer Name</label>
+      <input type="text" id="sub-customer" placeholder="e.g. CP Automation" />
+    </div>
+    <div class="form-group">
+      <label>Size</label>
+      <input type="text" id="sub-size" placeholder="e.g. 60x60" />
+    </div>
+    <div class="form-group">
+      <label>BOL Quantity</label>
+      <input type="number" id="sub-bol-qty" placeholder="Total pallets on BOL" min="1" />
+    </div>
+    <div class="form-group">
+      <label>Production Type</label>
+      <select id="sub-type">
+        <option value="solo">Solo</option>
+        <option value="team">Team</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>Quantity Built</label>
+      <input type="number" id="sub-qty" placeholder="How many did you build?" min="1" />
+    </div>
+    <div class="form-group">
+      <label>Work Date</label>
+      <input type="date" id="sub-date" />
+    </div>
+    <button class="btn btn-green" style="width:100%; justify-content:center; margin-top:8px;" onclick="submitProduction()">
+      <span id="submit-btn-text">Submit</span>
+    </button>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     MAIN APP
+══════════════════════════════════════════════════════════ -->
+<div id="app" style="display:none">
+
+  <!-- SIDEBAR -->
+  <nav id="sidebar">
+    <div class="sidebar-logo">
+      <h1>Reston Pallet</h1>
+      <p>Payroll System</p>
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-label">Overview</div>
+      <div class="nav-item active" onclick="nav('dashboard')">
+        <span class="icon">📊</span> Dashboard
+      </div>
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-label">Payroll</div>
+      <div class="nav-item" onclick="nav('run-payroll')">
+        <span class="icon">🚀</span> Run Payroll
+      </div>
+      <div class="nav-item" onclick="nav('workers')">
+        <span class="icon">👷</span> Workers
+      </div>
+      <div class="nav-item" onclick="nav('history')">
+        <span class="icon">📁</span> Week History
+      </div>
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-label">Production</div>
+      <div class="nav-item" onclick="nav('submissions')">
+        <span class="icon">📦</span> Submissions
+      </div>
+      <div class="nav-item" onclick="nav('rates')">
+        <span class="icon">⚙️</span> Master Rates
+      </div>
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-label">Insights</div>
+      <div class="nav-item" onclick="nav('performance')">
+        <span class="icon">📈</span> Performance
+      </div>
+    </div>
+
+    <div class="sidebar-bottom">
+      <div id="user-email" style="font-size:11px; color:rgba(255,255,255,0.5); margin-bottom:4px;"></div>
+      <button class="logout-btn" onclick="logout()">Sign Out</button>
+    </div>
+  </nav>
+
+  <!-- MAIN -->
+  <div id="main">
+    <div id="topbar">
+      <h2 id="page-title">Dashboard</h2>
+      <div class="topbar-right">
+        <span id="topbar-week" class="badge badge-green"></span>
+      </div>
+    </div>
+
+    <div id="content">
+
+      <!-- ── DASHBOARD ── -->
+      <div id="page-dashboard" class="page active">
+        <div class="stat-grid" id="dash-stats">
+          <div class="stat-card"><div class="stat-label">Total Labor Cost</div><div class="stat-value" id="ds-total">—</div><div class="stat-sub">this week</div></div>
+          <div class="stat-card"><div class="stat-label">Hourly Pay</div><div class="stat-value" id="ds-hourly">—</div><div class="stat-sub">this week</div></div>
+          <div class="stat-card"><div class="stat-label">Piece Rate Pay</div><div class="stat-value" id="ds-piece">—</div><div class="stat-sub">this week</div></div>
+          <div class="stat-card"><div class="stat-label">Active Workers</div><div class="stat-value" id="ds-workers">—</div><div class="stat-sub">this week</div></div>
+          <div class="stat-card"><div class="stat-label">Flags</div><div class="stat-value" id="ds-flags" style="color:var(--red)">—</div><div class="stat-sub">need review</div></div>
+        </div>
+
+        <div class="grid-2">
+          <div>
+            <div class="section-header">
+              <h3>Worker Totals</h3>
+              <button class="btn btn-outline btn-sm" onclick="nav('workers')">View All</button>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Worker</th><th>Net Hrs</th><th>Total Pay</th><th>Flag</th></tr></thead>
+                <tbody id="dash-workers-table"><tr><td colspan="4" class="empty-state" style="padding:24px; text-align:center; color:var(--gray-400)">Run payroll to see data</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+          <div>
+            <div class="section-header">
+              <h3>Recent Submissions</h3>
+              <button class="btn btn-outline btn-sm" onclick="nav('submissions')">View All</button>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Worker</th><th>Customer</th><th>Qty</th><th>Date</th></tr></thead>
+                <tbody id="dash-submissions-table"><tr><td colspan="4" style="padding:24px; text-align:center; color:var(--gray-400)">No submissions yet</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── RUN PAYROLL ── -->
+      <div id="page-run-payroll" class="page">
+        <div class="grid-2" style="align-items:start">
+          <div>
+            <div class="card mb-16">
+              <div class="card-title">Step 1 — Import Homebase CSV</div>
+              <p class="text-muted" style="margin: 8px 0 12px">Export CSV from Homebase Timesheets, then drag the file below — or paste directly</p>
+
+              <!-- Drop zone -->
+              <div id="drop-zone" onclick="document.getElementById('csv-file').click()" style="
+                border: 2px dashed var(--gray-200); border-radius: 10px;
+                padding: 28px; text-align: center; cursor: pointer;
+                background: var(--gray-50); transition: all 0.2s; margin-bottom: 12px;">
+                <div style="font-size: 32px; margin-bottom: 8px;">📂</div>
+                <div style="font-size: 14px; font-weight: 600; color: var(--navy);" id="drop-label">Drop your CSV file here</div>
+                <div style="font-size: 12px; color: var(--gray-400); margin-top: 4px;">or click to browse</div>
+                <input type="file" id="csv-file" accept=".csv" style="display:none" onchange="handleFileSelect(event)" />
+              </div>
+
+              <!-- Divider -->
+              <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+                <div style="flex:1; height:1px; background:var(--gray-200)"></div>
+                <span style="font-size:11px; color:var(--gray-400); font-weight:600;">OR PASTE MANUALLY</span>
+                <div style="flex:1; height:1px; background:var(--gray-200)"></div>
+              </div>
+
+              <div class="form-group" style="margin:0">
+                <textarea id="csv-input" placeholder="Paste CSV here...&#10;&#10;Name,Clock in date,Clock in time,Clock out date,Clock out time..." style="min-height:80px;"></textarea>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-title">Step 2 — Confirm & Run</div>
+              <div id="week-detected" class="alert alert-navy" style="display:none; margin-top:12px"></div>
+              <div id="run-error" class="alert alert-red" style="display:none; margin-top:12px"></div>
+              <div id="run-success" class="alert alert-green" style="display:none; margin-top:12px"></div>
+              <div style="display:flex; gap:10px; margin-top:16px;">
+                <button class="btn btn-outline" onclick="detectWeek()">Detect Week</button>
+                <button class="btn btn-green" id="run-btn" onclick="runPayroll()" disabled>
+                  <span id="run-btn-text">🚀 Run Payroll</span>
+                </button>
+              </div>
+            </div>
+          </div>
+          <div>
+            <div class="card">
+              <div class="card-title">Payroll Rules Applied</div>
+              <div style="margin-top:12px; font-size:13px; display:flex; flex-direction:column; gap:10px;">
+                <div style="padding:10px; background:var(--gray-50); border-radius:8px;">
+                  <strong>Break Deductions</strong>
+                  <div class="text-muted" style="margin-top:4px">≤4.5 hrs: 30 min &nbsp;|&nbsp; ≤6 hrs: 60 min &nbsp;|&nbsp; 6+ hrs: 90 min</div>
+                </div>
+                <div style="padding:10px; background:var(--gray-50); border-radius:8px;">
+                  <strong>Worker Exceptions</strong>
+                  <div class="text-muted" style="margin-top:4px">Stan, Dylan: no break &nbsp;|&nbsp; Slade: 30 min flat &nbsp;|&nbsp; Rajesh: max 45 min</div>
+                </div>
+                <div style="padding:10px; background:var(--gray-50); border-radius:8px;">
+                  <strong>Clock Rounding</strong>
+                  <div class="text-muted" style="margin-top:4px">In: ceiling 15 min &nbsp;|&nbsp; Out: floor 15 min &nbsp;|&nbsp; Start cap: 7:00am (except Stan, Chris, Pawel)</div>
+                </div>
+                <div style="padding:10px; background:var(--gray-50); border-radius:8px;">
+                  <strong>Piece Rate</strong>
+                  <div class="text-muted" style="margin-top:4px">BOL validation by BOL + Size &nbsp;|&nbsp; Late flag if submitted 7+ days late</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── WORKERS ── -->
+      <div id="page-workers" class="page">
+        <!-- Controls row -->
+        <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px; flex-wrap:wrap;">
+          <label style="margin:0; font-size:13px; font-weight:600; color:var(--gray-600);">Week:</label>
+          <select id="workers-week-select" onchange="loadWorkersTab()" style="width:auto; padding:7px 12px;">
+            <option value="">— Select a week —</option>
+          </select>
+          <!-- View toggle -->
+          <div style="margin-left:auto; display:flex; gap:6px;">
+            <button id="tab-detail"  class="btn btn-primary btn-sm" onclick="setWorkersView('detail')">📋 Shift Detail</button>
+            <button id="tab-summary" class="btn btn-outline btn-sm" onclick="setWorkersView('summary')">📊 Summary</button>
+          </div>
+        </div>
+
+        <!-- DETAIL VIEW (default) — one row per shift like the screenshot -->
+        <div id="workers-detail-view">
+          <div class="table-wrap">
+            <table id="shifts-table-el" style="font-size:12px;">
+              <thead>
+                <tr>
+                  <th style="width:140px">Worker</th>
+                  <th>Role</th>
+                  <th>Date</th>
+                  <th>Day</th>
+                  <th>Clock-In</th>
+                  <th>Clock-Out</th>
+                  <th style="color:#aac4e8">Actual In</th>
+                  <th style="color:#aac4e8">Actual Out</th>
+                  <th>Raw Hrs</th>
+                  <th>Break</th>
+                  <th>Net Hrs</th>
+                  <th>Weekly Total</th>
+                  <th>Rate</th>
+                  <th>Total Pay</th>
+                </tr>
+              </thead>
+              <tbody id="shifts-table">
+                <tr><td colspan="14" style="padding:32px; text-align:center; color:var(--gray-400)">Select a week above</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- SUMMARY VIEW -->
+        <div id="workers-summary-view" style="display:none;">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Worker</th><th>Role</th><th>Net Hrs</th>
+                  <th>Hourly Pay</th><th>Piece Rate Pay</th><th>Combined Total</th><th>Flag</th>
+                </tr>
+              </thead>
+              <tbody id="workers-table">
+                <tr><td colspan="7" style="padding:32px; text-align:center; color:var(--gray-400)">Select a week above</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="flags-section" style="display:none; margin-top:24px;">
+          <div class="section-header">
+            <h3 style="color:var(--red)">🚩 Flags — Review Required</h3>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Worker</th><th>Date</th><th>BOL</th><th>Customer | Size | Type</th><th>Qty</th><th>Issue</th></tr></thead>
+              <tbody id="flags-table"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── WEEK HISTORY ── -->
+      <div id="page-history" class="page">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Week</th><th>Status</th><th>Workers</th><th>Total Hours</th><th>Hourly Pay</th><th>Piece Pay</th><th>Total Pay</th><th></th></tr></thead>
+            <tbody id="history-table">
+              <tr><td colspan="8" style="padding:32px; text-align:center; color:var(--gray-400)">No weeks processed yet</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ── SUBMISSIONS ── -->
+      <div id="page-submissions" class="page">
+        <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px; flex-wrap:wrap;">
+          <input type="text" id="sub-search" placeholder="Search worker or BOL..." style="width:220px;" oninput="filterSubmissions()" />
+          <select id="sub-filter-week" onchange="filterSubmissions()" style="width:180px;">
+            <option value="">All weeks</option>
+          </select>
+          <div style="margin-left:auto;">
+            <button class="btn btn-outline btn-sm" onclick="nav('submit')">+ Add Manual Entry</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Worker</th><th>Date</th><th>BOL</th><th>Customer</th><th>Size | Type</th><th>Qty</th><th>BOL Qty</th><th>Rate</th><th>Earnings</th><th>Flag</th></tr></thead>
+            <tbody id="submissions-table">
+              <tr><td colspan="10" style="padding:32px; text-align:center; color:var(--gray-400)">No submissions yet</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ── MASTER RATES ── -->
+      <div id="page-rates" class="page">
+        <div class="grid-2" style="align-items:start">
+          <div>
+            <div class="section-header">
+              <h3>Current Rates</h3>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Customer</th><th>Type</th><th>Size</th><th>Rate</th><th></th></tr></thead>
+                <tbody id="rates-table">
+                  <tr><td colspan="5" style="padding:32px; text-align:center; color:var(--gray-400)">No rates yet</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div>
+            <div class="card">
+              <div class="card-title">Add New Rate</div>
+              <div id="rate-success" class="alert alert-green" style="display:none; margin-top:12px"></div>
+              <div id="rate-error" class="alert alert-red" style="display:none; margin-top:12px"></div>
+              <div class="form-group mt-16">
+                <label>Customer Name</label>
+                <input type="text" id="rate-customer" placeholder="e.g. CP Automation" />
+              </div>
+              <div class="form-group">
+                <label>Type</label>
+                <select id="rate-type">
+                  <option value="solo">Solo</option>
+                  <option value="team">Team</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Size</label>
+                <input type="text" id="rate-size" placeholder="e.g. 60x60" />
+              </div>
+              <div class="form-group">
+                <label>Rate ($ per unit)</label>
+                <input type="number" id="rate-value" placeholder="e.g. 1.39" step="0.01" min="0" />
+              </div>
+              <button class="btn btn-green" onclick="addRate()">Add Rate</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── PERFORMANCE ── -->
+      <div id="page-performance" class="page">
+        <div style="display:flex; align-items:center; gap:12px; margin-bottom:20px;">
+          <label style="margin:0; font-size:13px; font-weight:600; color:var(--gray-600)">Worker:</label>
+          <select id="perf-worker-select" onchange="loadPerformance()" style="width:220px;">
+            <option value="">— All Workers —</option>
+          </select>
+        </div>
+
+        <div class="stat-grid" id="perf-stats">
+          <div class="stat-card"><div class="stat-label">Avg Hours/Week</div><div class="stat-value" id="ps-hrs">—</div></div>
+          <div class="stat-card"><div class="stat-label">Total Pieces Built</div><div class="stat-value" id="ps-pieces">—</div></div>
+          <div class="stat-card"><div class="stat-label">Total Earnings</div><div class="stat-value" id="ps-earnings">—</div></div>
+          <div class="stat-card"><div class="stat-label">Late Clock-ins</div><div class="stat-value" id="ps-late" style="color:var(--amber)">—</div></div>
+        </div>
+
+        <div class="grid-2" style="margin-top:8px;">
+          <div>
+            <div class="section-header"><h3>Hours by Week</h3></div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Week</th><th>Net Hrs</th><th>Late Days</th><th>Hourly Pay</th></tr></thead>
+                <tbody id="perf-hours-table"><tr><td colspan="4" style="padding:24px; text-align:center; color:var(--gray-400)">Select a worker</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+          <div>
+            <div class="section-header"><h3>Piece Rate by Week</h3></div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Week</th><th>Pieces</th><th>Earnings</th></tr></thead>
+                <tbody id="perf-piece-table"><tr><td colspan="3" style="padding:24px; text-align:center; color:var(--gray-400)">Select a worker</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     JAVASCRIPT
+══════════════════════════════════════════════════════════ -->
+<script>
+const SUPABASE_URL = 'https://scovtwktgnxbtfsvfayw.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNjb3Z0d2t0Z254YnRmc3ZmYXl3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzOTUwNDQsImV4cCI6MjA5MTk3MTA0NH0.P-nChMXtlZhK9jnTbqgdYZttDjdppnpRgzkMDJWdiiI';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+let currentWeekId = null;
+let allSubmissions = [];
+let detectedWeekStart = null;
+let detectedWeekEnd = null;
+let detectedWeekLabel = '';
+
+// ── WORKER RULES ────────────────────────────────────────────
+const WORKER_CONFIG = {
+  'Chris Gruchalla':   { role:'Forklift',  rate:24.50 },
+  'David S':           { role:'Grinding',  rate:17.60 },
+  'Eduardo Leal':      { role:'Misc',      rate:22.00 },
+  'Eric Yeboah':       { role:'Trim',      rate:17.60 },
+  'Gustavo Huerta':    { role:'Misc',      rate:17.60 },
+  'Harmanpreet Singh': { role:'Misc',      rate:17.60 },
+  'Jorge':             { role:'Misc',      rate:17.60 },
+  'Jose Reyna':        { role:'Misc',      rate:17.60 },
+  'Morgan':            { role:'Cutting',   rate:17.60 },
+  'Noe Israel':        { role:'Misc',      rate:17.75 },
+  'Pawel Skryzpecki':  { role:'Misc',      rate:24.50 },
+  'Rajesh Bishboi':    { role:'Misc',      rate:19.00 },
+  'Samuel Owusu':      { role:'Misc',      rate:17.60 },
+  'Slade':             { role:'Misc',      rate:18.00 },
+  'Stan':              { role:'Misc',      rate:19.00 },
+  'Thomas Adu':        { role:'Misc',      rate:17.60 },
+  'Vishaldeep Singh':  { role:'Misc',      rate:17.60 },
+  'Yair Moreno':       { role:'Misc',      rate:17.60 },
+  'Vinicio Burke':     { role:'Misc',      rate:17.60 },
+  'Dylan Scott Gill':  { role:'Misc',      rate:20.00 },
+};
+
+// ── INIT ────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', async () => {
+  // Check if this is the worker submit page (?submit)
+  if (window.location.search.includes('submit')) {
+    showSubmitPage();
+    return;
+  }
+  // Check existing session
+  const { data: { session } } = await sb.auth.getSession();
+  if (session) showApp(session.user);
+  else showLogin();
+});
+
+function showLogin() {
+  document.getElementById('login-page').style.display = 'flex';
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('submit-page').style.display = 'none';
+}
+
+function showApp(user) {
+  document.getElementById('login-page').style.display = 'none';
+  document.getElementById('app').style.display = 'flex';
+  document.getElementById('submit-page').style.display = 'none';
+  document.getElementById('user-email').textContent = user.email;
+  loadDashboard();
+  loadWeekDropdowns();
+  loadRates();
+  loadSubmissions();
+  populateWorkerSelect();
+}
+
+function showSubmitPage() {
+  document.getElementById('login-page').style.display = 'none';
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('submit-page').style.display = 'flex';
+  // Set today as default date
+  document.getElementById('sub-date').value = new Date().toISOString().split('T')[0];
+  // Pre-fill from URL params (QR code)
+  const p = new URLSearchParams(window.location.search);
+  if (p.get('bol'))      document.getElementById('sub-bol').value      = p.get('bol');
+  if (p.get('customer')) document.getElementById('sub-customer').value = p.get('customer');
+  if (p.get('size'))     document.getElementById('sub-size').value     = p.get('size');
+  if (p.get('bol_qty'))  document.getElementById('sub-bol-qty').value  = p.get('bol_qty');
+}
+
+// ── AUTH ─────────────────────────────────────────────────────
+async function login() {
+  const email    = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value;
+  const errEl    = document.getElementById('login-error');
+  const btnText  = document.getElementById('login-btn-text');
+
+  btnText.innerHTML = '<div class="spinner"></div>';
+  errEl.style.display = 'none';
+
+  const { data, error } = await sb.auth.signInWithPassword({ email, password });
+  if (error) {
+    errEl.textContent = error.message;
+    errEl.style.display = 'flex';
+    btnText.textContent = 'Sign In';
+  } else {
+    showApp(data.user);
+  }
+}
+
+async function logout() {
+  await sb.auth.signOut();
+  showLogin();
+}
+
+document.getElementById('login-password').addEventListener('keydown', e => {
+  if (e.key === 'Enter') login();
+});
+
+// ── NAVIGATION ───────────────────────────────────────────────
+function nav(page) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+
+  const pageEl = document.getElementById('page-' + page);
+  if (pageEl) pageEl.classList.add('active');
+
+  const titles = {
+    dashboard: 'Dashboard', 'run-payroll': 'Run Payroll',
+    workers: 'Workers', history: 'Week History',
+    submissions: 'Submissions', rates: 'Master Rates',
+    performance: 'Performance'
+  };
+  document.getElementById('page-title').textContent = titles[page] || page;
+
+  // Find and activate matching nav item
+  document.querySelectorAll('.nav-item').forEach(item => {
+    if (item.textContent.trim().toLowerCase().includes(
+      page.replace('-',' ').toLowerCase().split(' ')[0]
+    )) item.classList.add('active');
+  });
+
+  if (page === 'history')     loadHistory();
+  if (page === 'workers')     loadWorkersTab();
+  if (page === 'submissions') loadSubmissions();
+  if (page === 'performance') loadPerformance();
+}
+
+// ── DASHBOARD ────────────────────────────────────────────────
+async function loadDashboard() {
+  // Get latest week
+  const { data: weeks } = await sb.from('week_periods')
+    .select('*').order('week_start', { ascending: false }).limit(1);
+
+  if (!weeks || weeks.length === 0) return;
+  const week = weeks[0];
+  currentWeekId = week.id;
+  document.getElementById('topbar-week').textContent = week.label;
+
+  // Get worker summaries for this week
+  const { data: summaries } = await sb.from('worker_week_summary')
+    .select('*').eq('week_id', week.id).order('total_pay', { ascending: false });
+
+  if (!summaries) return;
+
+  let totalHourly = 0, totalPiece = 0, flagCount = 0;
+  const tbody = document.getElementById('dash-workers-table');
+  tbody.innerHTML = '';
+
+  summaries.forEach(s => {
+    totalHourly += s.hourly_pay || 0;
+    totalPiece  += s.piece_pay  || 0;
+    if (s.has_flag) flagCount++;
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><strong>${s.worker_name}</strong></td>
+      <td class="td-hrs">${(s.net_hrs || 0).toFixed(2)}</td>
+      <td class="td-money">$${(s.total_pay || 0).toFixed(2)}</td>
+      <td class="td-flag">${s.has_flag ? '🚩' : ''}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  document.getElementById('ds-total').textContent   = '$' + (totalHourly + totalPiece).toFixed(2);
+  document.getElementById('ds-hourly').textContent  = '$' + totalHourly.toFixed(2);
+  document.getElementById('ds-piece').textContent   = '$' + totalPiece.toFixed(2);
+  document.getElementById('ds-workers').textContent = summaries.length;
+  document.getElementById('ds-flags').textContent   = flagCount;
+
+  // Recent submissions
+  const { data: subs } = await sb.from('piece_submissions')
+    .select('*').order('submitted_at', { ascending: false }).limit(8);
+
+  const stbody = document.getElementById('dash-submissions-table');
+  stbody.innerHTML = '';
+  if (subs && subs.length > 0) {
+    subs.forEach(s => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${s.worker_name}</td>
+        <td>${s.customer_name}</td>
+        <td>${s.qty}</td>
+        <td class="td-muted">${new Date(s.work_date).toLocaleDateString('en-US', {month:'short', day:'numeric'})}</td>
+      `;
+      stbody.appendChild(tr);
+    });
+  }
+}
+
+// ── DETECT WEEK FROM CSV ──────────────────────────────────────
+// ── DRAG AND DROP / FILE SELECT ──────────────────────────────
+function handleFileSelect(event) {
+  const file = event.target.files[0];
+  if (file) loadCSVFile(file);
+}
+
+function loadCSVFile(file) {
+  if (!file.name.endsWith('.csv') && file.type !== 'text/csv') {
+    alert('Please select a CSV file.');
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    document.getElementById('csv-input').value = e.target.result;
+    document.getElementById('drop-label').textContent = '✅ ' + file.name + ' loaded';
+    document.getElementById('drop-zone').style.borderColor = 'var(--green)';
+    document.getElementById('drop-zone').style.background = 'var(--green-light)';
+    detectWeek();
+  };
+  reader.readAsText(file);
+}
+
+// Drag and drop events
+document.addEventListener('DOMContentLoaded', function() {
+  const zone = document.getElementById('drop-zone');
+  if (!zone) return;
+
+  zone.addEventListener('dragover', function(e) {
+    e.preventDefault();
+    zone.style.borderColor = 'var(--navy)';
+    zone.style.background = '#EBF3FF';
+  });
+
+  zone.addEventListener('dragleave', function() {
+    zone.style.borderColor = 'var(--gray-200)';
+    zone.style.background = 'var(--gray-50)';
+  });
+
+  zone.addEventListener('drop', function(e) {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (file) loadCSVFile(file);
+  });
+});
+
+function detectWeek() {
+  const csv = document.getElementById('csv-input').value.trim();
+  if (!csv) { alert('Please paste CSV data first.'); return; }
+
+  const lines = csv.split('\n').filter(l => l.trim());
+  if (lines.length < 2) { alert('CSV appears to be empty.'); return; }
+
+  // Find earliest date in column B (index 1)
+  let earliest = null;
+  for (let i = 1; i < lines.length; i++) {
+    const cols = parseCSVLine(lines[i]);
+    if (!cols[1]) continue;
+    const d = new Date(cols[1]);
+    if (isNaN(d)) continue;
+    d.setHours(0,0,0,0);
+    if (!earliest || d < earliest) earliest = d;
+  }
+
+  if (!earliest) { alert('Could not detect dates. Make sure column B has dates.'); return; }
+
+  // Roll back to Monday
+  const day  = earliest.getDay();
+  const diff = day === 0 ? 6 : day - 1;
+  detectedWeekStart = new Date(earliest);
+  detectedWeekStart.setDate(earliest.getDate() - diff);
+  detectedWeekStart.setHours(0,0,0,0);
+
+  detectedWeekEnd = new Date(detectedWeekStart);
+  detectedWeekEnd.setDate(detectedWeekStart.getDate() + 7);
+
+  const sunday = new Date(detectedWeekStart);
+  sunday.setDate(detectedWeekStart.getDate() + 6);
+
+  const fmt = d => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  detectedWeekLabel = fmt(detectedWeekStart) + ' - ' + fmt(sunday) + ', ' + sunday.getFullYear();
+
+  const el = document.getElementById('week-detected');
+  el.textContent = 'Week detected: ' + detectedWeekLabel + ' — Click Run Payroll to proceed.';
+  el.style.display = 'flex';
+  document.getElementById('run-btn').disabled = false;
+  document.getElementById('run-error').style.display = 'none';
+  document.getElementById('run-success').style.display = 'none';
+}
+
+// ── RUN PAYROLL ───────────────────────────────────────────────
+async function runPayroll() {
+  if (!detectedWeekStart) { detectWeek(); return; }
+
+  const btn     = document.getElementById('run-btn');
+  const btnText = document.getElementById('run-btn-text');
+  const errEl   = document.getElementById('run-error');
+  const sucEl   = document.getElementById('run-success');
+
+  btn.disabled = true;
+  btnText.innerHTML = '<div class="spinner"></div> Processing...';
+  errEl.style.display = 'none';
+  sucEl.style.display = 'none';
+
+  try {
+    const csv   = document.getElementById('csv-input').value.trim();
+    const lines = csv.split('\n').filter(l => l.trim());
+
+    // Process hourly shifts
+    const shifts      = processHourlyCSV(lines, detectedWeekStart, detectedWeekEnd);
+    const workerTotals = {}; // name -> { netHrs, pay, lateDays }
+
+    shifts.forEach(s => {
+      if (!workerTotals[s.worker_name]) {
+        workerTotals[s.worker_name] = { netHrs: 0, pay: 0, lateDays: 0 };
+      }
+      workerTotals[s.worker_name].netHrs   += s.net_hrs;
+      workerTotals[s.worker_name].pay      += s.total_pay;
+      // Count late days — clock-in after 7:00am original time
+      if (s.actual_in) {
+        const parts = s.actual_in.match(/(\d+):(\d+)(am|pm)/i);
+        if (parts) {
+          let h = parseInt(parts[1]);
+          if (parts[3].toLowerCase() === 'pm' && h !== 12) h += 12;
+          if (parts[3].toLowerCase() === 'am' && h === 12) h = 0;
+          if (h > 7 || (h === 7 && parseInt(parts[2]) > 0)) {
+            workerTotals[s.worker_name].lateDays++;
+          }
+        }
+      }
+    });
+
+    // Get piece rate data for this week
+    const weekStartStr = detectedWeekStart.toISOString().split('T')[0];
+    const weekEndStr   = detectedWeekEnd.toISOString().split('T')[0];
+
+    const { data: pieceSubs } = await sb.from('piece_submissions')
+      .select('*')
+      .gte('work_date', weekStartStr)
+      .lt('work_date', weekEndStr);
+
+    // Load master rates
+    const { data: ratesData } = await sb.from('master_rates').select('*');
+    const rateMap = {};
+    (ratesData || []).forEach(r => {
+      const key = r.customer_name.toLowerCase() + '|' + r.size.toLowerCase() + '|' + r.prod_type.toLowerCase();
+      rateMap[key] = r.rate;
+    });
+
+    // Calculate piece rate earnings + validate BOL
+    const pieceTotals = {}; // name -> { pay, pieces }
+    const bolMap      = {}; // bol|size -> { bolQty, entries }
+    const flags       = [];
+
+    (pieceSubs || []).forEach(sub => {
+      const key   = sub.bol_number + '|' + sub.size.toLowerCase();
+      if (!bolMap[key]) bolMap[key] = { bolQty: sub.bol_qty || 0, solo: [], team: [] };
+      if (sub.prod_type === 'solo') bolMap[key].solo.push(sub);
+      else                          bolMap[key].team.push(sub);
+    });
+
+    // Validate BOL
+    Object.keys(bolMap).forEach(key => {
+      const b      = bolMap[key];
+      const bolQty = b.bolQty;
+      if (!bolQty) return;
+      const soloTotal = b.solo.reduce((s, e) => s + e.qty, 0);
+      const maxTeam   = b.team.reduce((m, e) => Math.max(m, e.qty), 0);
+      if (soloTotal > bolQty) b.solo.forEach(e => { if (!e.issue) e.issue = 'Solo total (' + soloTotal + ') > BOL qty (' + bolQty + ')'; });
+      if (maxTeam   > bolQty) b.team.forEach(e => { if (e.qty === maxTeam && !e.issue) e.issue = 'Team qty (' + e.qty + ') > BOL qty (' + bolQty + ')'; });
+    });
+
+    (pieceSubs || []).forEach(sub => {
+      const rKey    = sub.customer_name.toLowerCase() + '|' + sub.size.toLowerCase() + '|' + sub.prod_type.toLowerCase();
+      const rate    = rateMap[rKey] || rateMap[sub.customer_name.toLowerCase() + '|' + sub.size.toLowerCase()];
+      const issue   = sub.issue || (!rate ? 'No rate: ' + sub.customer_name + ' | ' + sub.size + ' | ' + sub.prod_type : '');
+      const earnings = rate ? sub.qty * rate : 0;
+
+      if (issue) flags.push({ ...sub, issue });
+
+      if (!pieceTotals[sub.worker_name]) pieceTotals[sub.worker_name] = { pay: 0, pieces: 0 };
+      pieceTotals[sub.worker_name].pay    += earnings;
+      pieceTotals[sub.worker_name].pieces += sub.qty;
+
+      // Update submission with rate + earnings
+      sb.from('piece_submissions').update({ rate: rate || null, earnings: earnings, issue: issue })
+        .eq('id', sub.id);
+    });
+
+    // Create or update week period
+    const weekTag = 'Week ' + detectedWeekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    const { data: existingWeek } = await sb.from('week_periods')
+      .select('id').eq('week_start', weekStartStr).single();
+
+    let weekId;
+    if (existingWeek) {
+      weekId = existingWeek.id;
+      await sb.from('week_periods').update({ label: detectedWeekLabel, updated_at: new Date().toISOString() }).eq('id', weekId);
+      await sb.from('hourly_shifts').delete().eq('week_id', weekId);
+      await sb.from('worker_week_summary').delete().eq('week_id', weekId);
+    } else {
+      const { data: newWeek } = await sb.from('week_periods').insert({
+        week_start: weekStartStr,
+        week_end:   weekEndStr,
+        label:      detectedWeekLabel,
+        status:     'draft'
+      }).select('id').single();
+      weekId = newWeek.id;
+    }
+
+    // Insert shifts
+    if (shifts.length > 0) {
+      const shiftsWithWeek = shifts.map(s => ({ ...s, week_id: weekId }));
+      await sb.from('hourly_shifts').insert(shiftsWithWeek);
+    }
+
+    // Update piece submissions with week_id
+    if (pieceSubs && pieceSubs.length > 0) {
+      await sb.from('piece_submissions').update({ week_id: weekId })
+        .gte('work_date', weekStartStr).lt('work_date', weekEndStr);
+    }
+
+    // Build worker week summary
+    const allWorkers = new Set([...Object.keys(workerTotals), ...Object.keys(pieceTotals)]);
+    const summaryRows = [];
+
+    allWorkers.forEach(name => {
+      const h = workerTotals[name]  || { netHrs: 0, pay: 0, lateDays: 0 };
+      const p = pieceTotals[name]   || { pay: 0, pieces: 0 };
+      const hasFlag = flags.some(f => f.worker_name === name);
+      summaryRows.push({
+        week_id:      weekId,
+        worker_name:  name,
+        net_hrs:      Math.round(h.netHrs * 100) / 100,
+        hourly_pay:   Math.round(h.pay    * 100) / 100,
+        piece_pay:    Math.round(p.pay    * 100) / 100,
+        total_pay:    Math.round((h.pay + p.pay) * 100) / 100,
+        pieces_built: p.pieces,
+        late_days:    h.lateDays,
+        has_flag:     hasFlag
+      });
+    });
+
+    if (summaryRows.length > 0) {
+      await sb.from('worker_week_summary').insert(summaryRows);
+    }
+
+    currentWeekId = weekId;
+    sucEl.textContent = '✅ Payroll complete for ' + detectedWeekLabel +
+      (flags.length > 0 ? ' — ' + flags.length + ' flag(s) need review.' : ' — No issues found.');
+    sucEl.style.display = 'flex';
+    loadDashboard();
+    loadWeekDropdowns();
+
+  } catch (err) {
+    errEl.textContent = 'Error: ' + err.message;
+    errEl.style.display = 'flex';
+    console.error(err);
+  }
+
+  btn.disabled = false;
+  btnText.innerHTML = '🚀 Run Payroll';
+}
+
+// ── PROCESS HOURLY CSV ────────────────────────────────────────
+function processHourlyCSV(lines, weekStart, weekEnd) {
+  const shifts   = [];
+  const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+  for (let i = 1; i < lines.length; i++) {
+    const cols = parseCSVLine(lines[i]);
+    const name = (cols[0] || '').trim();
+    if (!name) continue;
+
+    const ciDate = parseDate(cols[1]);
+    const coDate = parseDate(cols[3]);
+    const ciHM   = parseTime(cols[2]);
+    const coHM   = parseTime(cols[4]);
+    if (!ciDate || !coDate || !ciHM || !coHM) continue;
+    if (ciDate < weekStart || ciDate >= weekEnd) continue;
+
+    const config = WORKER_CONFIG[name] || { role: 'Unknown', rate: 0 };
+    let inHM  = roundUp15(ciHM);
+    let outHM = roundDown15(coHM);
+
+    const noSevenCap = ['Stan','Chris Gruchalla','Pawel Skryzpecki'].includes(name);
+    if (inHM.h < 7 && !noSevenCap) inHM = { h: 7, m: 0 };
+
+    let inMin  = toMin(inHM);
+    let outMin = toMin(outHM);
+    if (coDate > ciDate || outMin < inMin) outMin += 1440;
+
+    const rawHrs   = Math.max(0, (outMin - inMin) / 60);
+    const brkMins  = calcBreak(outHM, name, coDate);
+    const netHrs   = Math.max(0, rawHrs - brkMins / 60);
+    const totalPay = Math.round(netHrs * config.rate * 100) / 100;
+
+    shifts.push({
+      worker_name: name,
+      shift_date:  ciDate.toISOString().split('T')[0],
+      day_name:    dayNames[ciDate.getDay()],
+      actual_in:   fmtTime(ciHM),
+      actual_out:  fmtTime(coHM),
+      clock_in:    fmtTime(inHM),
+      clock_out:   fmtTime(outHM),
+      raw_hrs:     Math.round(rawHrs * 100) / 100,
+      break_mins:  brkMins,
+      net_hrs:     Math.round(netHrs * 100) / 100,
+      hourly_rate: config.rate,
+      total_pay:   totalPay
+    });
+  }
+  return shifts;
+}
+
+// ── BREAK CALCULATION ─────────────────────────────────────────
+function calcBreak(outHM, name, date) {
+  if (['Stan','Dylan Scott Gill'].includes(name)) return 0;
+  if (name === 'Slade') return 30;
+  const mins    = toMin(outHM);
+  const isNight = outHM.h < 7;
+  if (name === 'Chris Gruchalla' && date.getDay() === 6) return mins < 870 ? 0 : 30;
+  if (['Chris Gruchalla','Pawel Skryzpecki'].includes(name)) {
+    if (isNight) return 60;
+    return mins <= 870 ? 30 : 60;
+  }
+  if (name === 'Rajesh Bishboi') {
+    const b = isNight ? 90 : (mins <= 870 ? 30 : mins <= 1110 ? 60 : 90);
+    return Math.min(b, 45);
+  }
+  if (isNight)      return 90;
+  if (mins <= 870)  return 30;
+  if (mins <= 1110) return 60;
+  return 90;
+}
+
+// ── TIME / DATE HELPERS ───────────────────────────────────────
+function parseCSVLine(line) {
+  const result = []; let cur = ''; let inQ = false;
+  for (let c of line) {
+    if (c === '"') { inQ = !inQ; }
+    else if (c === ',' && !inQ) { result.push(cur.trim()); cur = ''; }
+    else cur += c;
+  }
+  result.push(cur.trim());
+  return result;
+}
+
+function parseDate(val) {
+  if (!val) return null;
+  const d = new Date(val);
+  if (isNaN(d)) return null;
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+function parseTime(val) {
+  if (!val) return null;
+  if (val instanceof Date) return { h: val.getHours(), m: val.getMinutes() };
+  const s = String(val).trim();
+  const m = s.match(/(\d{1,2}):(\d{2})\s*(am|pm)/i);
+  if (m) {
+    let h = parseInt(m[1]);
+    if (m[3].toLowerCase() === 'pm' && h !== 12) h += 12;
+    if (m[3].toLowerCase() === 'am' && h === 12) h = 0;
+    return { h, m: parseInt(m[2]) };
+  }
+  // Try as date string
+  const d = new Date(val);
+  if (!isNaN(d)) return { h: d.getHours(), m: d.getMinutes() };
+  return null;
+}
+
+function toMin(hm)       { return hm.h * 60 + hm.m; }
+function fromMin(mins)   { mins = (mins + 1440) % 1440; return { h: Math.floor(mins/60), m: mins%60 }; }
+function roundUp15(hm)   { return fromMin(Math.ceil(toMin(hm) / 15) * 15); }
+function roundDown15(hm) { return fromMin(Math.floor(toMin(hm) / 15) * 15); }
+function fmtTime(hm) {
+  const h = hm.h % 12 || 12;
+  return h + ':' + String(hm.m).padStart(2,'0') + (hm.h >= 12 ? 'pm' : 'am');
+}
+function fmtMoney(v) { return '$' + (v||0).toFixed(2); }
+function fmtDate(d)  { return new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month:'short', day:'numeric' }); }
+
+// ── WORKERS TAB ───────────────────────────────────────────────
+async function loadWeekDropdowns() {
+  const { data: weeks } = await sb.from('week_periods')
+    .select('*').order('week_start', { ascending: false });
+
+  ['workers-week-select','sub-filter-week'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const first = el.options[0].outerHTML;
+    el.innerHTML = first;
+    (weeks || []).forEach(w => {
+      const opt = document.createElement('option');
+      opt.value = w.id;
+      opt.textContent = w.label;
+      el.appendChild(opt);
+    });
+  });
+
+  // Default to latest week
+  if (weeks && weeks.length > 0) {
+    const sel = document.getElementById('workers-week-select');
+    if (sel) { sel.value = weeks[0].id; }
+  }
+}
+
+// ── VIEW TOGGLE ──────────────────────────────────────────────
+function setWorkersView(view) {
+  const isDetail = view === 'detail';
+  document.getElementById('workers-detail-view').style.display  = isDetail ? 'block' : 'none';
+  document.getElementById('workers-summary-view').style.display = isDetail ? 'none'  : 'block';
+  document.getElementById('tab-detail').className  = isDetail ? 'btn btn-primary btn-sm' : 'btn btn-outline btn-sm';
+  document.getElementById('tab-summary').className = isDetail ? 'btn btn-outline btn-sm' : 'btn btn-primary btn-sm';
+}
+
+async function loadWorkersTab() {
+  const weekId = document.getElementById('workers-week-select').value;
+  const shiftsTbody  = document.getElementById('shifts-table');
+  const summaryTbody = document.getElementById('workers-table');
+
+  if (!weekId) {
+    shiftsTbody.innerHTML  = '<tr><td colspan="14" style="padding:32px; text-align:center; color:var(--gray-400)">Select a week</td></tr>';
+    summaryTbody.innerHTML = '<tr><td colspan="7"  style="padding:32px; text-align:center; color:var(--gray-400)">Select a week</td></tr>';
+    return;
+  }
+
+  // Load both shifts and summary in parallel
+  const [{ data: shifts }, { data: summaries }] = await Promise.all([
+    sb.from('hourly_shifts').select('*').eq('week_id', weekId).order('worker_name').order('shift_date'),
+    sb.from('worker_week_summary').select('*').eq('week_id', weekId).order('worker_name')
+  ]);
+
+  // ── DETAIL VIEW: shift rows ──────────────────────────────
+  shiftsTbody.innerHTML = '';
+  if (!shifts || shifts.length === 0) {
+    shiftsTbody.innerHTML = '<tr><td colspan="14" style="padding:32px; text-align:center; color:var(--gray-400)">No shift data for this week</td></tr>';
+  } else {
+    let prevWorker = null;
+    let workerRunningHrs = 0;
+    const rowEls = []; // collect rows then insert
+
+    // Build a running total map per worker
+    const workerRunning = {};
+    const workerColors = ['#FFFF00','#FF69B4','#90EE90','#87CEEB','#FFA500','#DDA0DD','#98FB98'];
+    let colorIdx = 0;
+    const workerColorMap = {};
+
+    shifts.forEach(s => {
+      if (!workerColorMap[s.worker_name]) {
+        workerColorMap[s.worker_name] = workerColors[colorIdx % workerColors.length];
+        colorIdx++;
+      }
+      if (!workerRunning[s.worker_name]) workerRunning[s.worker_name] = 0;
+      workerRunning[s.worker_name] += s.net_hrs || 0;
+    });
+
+    // Reset running totals for display
+    const runningDisplay = {};
+    let grandNetHrs = 0, grandPay = 0;
+
+    shifts.forEach((s, i) => {
+      if (!runningDisplay[s.worker_name]) runningDisplay[s.worker_name] = 0;
+      runningDisplay[s.worker_name] = Math.round((runningDisplay[s.worker_name] + (s.net_hrs || 0)) * 100) / 100;
+
+      const isNewWorker = s.worker_name !== prevWorker;
+
+      // Insert subtotal row before new worker (except first)
+      if (isNewWorker && prevWorker !== null) {
+        const subTr = document.createElement('tr');
+        subTr.style.cssText = 'background:#D6E4F0; font-weight:700; font-size:12px;';
+        const prevSummary = (summaries || []).find(x => x.worker_name === prevWorker);
+        const prevNetHrs = prevSummary ? prevSummary.net_hrs : 0;
+        const prevPay    = prevSummary ? prevSummary.hourly_pay : 0;
+        subTr.innerHTML = `
+          <td colspan="10" style="color:#1F3864; padding:6px 14px;">↳ ${prevWorker} — WEEK TOTAL</td>
+          <td style="background:#BDD7EE; color:#1F3864; font-weight:700;">${prevNetHrs.toFixed(2)}</td>
+          <td></td><td></td>
+          <td style="background:#BDD7EE; color:#1F3864; font-weight:700;">${fmtMoney(prevPay)}</td>
+        `;
+        shiftsTbody.appendChild(subTr);
+        // spacer
+        const spacer = document.createElement('tr');
+        spacer.style.height = '4px';
+        shiftsTbody.appendChild(spacer);
+        grandNetHrs += prevNetHrs;
+        grandPay    += prevPay;
+      }
+
+      // Name row — highlight with color if first row of this worker
+      const bg = isNewWorker
+        ? workerColorMap[s.worker_name]
+        : (i % 2 === 0 ? '#FFFFFF' : '#F2F2F2');
+
+      const tr = document.createElement('tr');
+      tr.style.cssText = 'font-size:12px;';
+
+      const dateStr = s.shift_date
+        ? new Date(s.shift_date + 'T00:00:00').toLocaleDateString('en-US', { month:'numeric', day:'numeric', year:'numeric' })
+        : '';
+
+      const breakStyle = (s.break_mins || 0) > 0
+        ? 'color:#C00000; font-weight:700; background:#FFE0E0;'
+        : 'color:#AAAAAA;';
+      const netStyle = 'background:#E8F5E9; font-weight:700; color:#1E5631;';
+      const payStyle = 'background:#E8F5E9; font-weight:700; color:#1E5631;';
+
+      tr.innerHTML = `
+        <td style="background:${bg}; font-weight:${isNewWorker ? '700' : '400'}; padding:7px 14px;">${isNewWorker ? s.worker_name : ''}</td>
+        <td style="background:${bg};">${isNewWorker ? (WORKER_CONFIG[s.worker_name] || {}).role || '' : ''}</td>
+        <td>${dateStr}</td>
+        <td>${s.day_name || ''}</td>
+        <td contenteditable="true" style="cursor:text; min-width:70px;" onblur="saveShiftEdit('${s.id}','clock_in',this.textContent.trim())">${s.clock_in || ''}</td>
+        <td contenteditable="true" style="cursor:text; min-width:70px;" onblur="saveShiftEdit('${s.id}','clock_out',this.textContent.trim())">${s.clock_out || ''}</td>
+        <td style="color:#999; font-style:italic;">${s.actual_in || ''}</td>
+        <td style="color:#999; font-style:italic;">${s.actual_out || ''}</td>
+        <td>${(s.raw_hrs || 0).toFixed(2)}</td>
+        <td style="${breakStyle} padding:7px 14px;">${s.break_mins || 0}</td>
+        <td style="${netStyle} padding:7px 14px;">${(s.net_hrs || 0).toFixed(2)}</td>
+        <td>${runningDisplay[s.worker_name].toFixed(2)}</td>
+        <td>$${(s.hourly_rate || 0).toFixed(2)}</td>
+        <td style="${payStyle} padding:7px 14px;">${fmtMoney(s.total_pay)}</td>
+      `;
+      shiftsTbody.appendChild(tr);
+      prevWorker = s.worker_name;
+    });
+
+    // Last worker subtotal
+    if (prevWorker) {
+      const subTr = document.createElement('tr');
+      subTr.style.cssText = 'background:#D6E4F0; font-weight:700; font-size:12px;';
+      const prevSummary = (summaries || []).find(x => x.worker_name === prevWorker);
+      const prevNetHrs = prevSummary ? prevSummary.net_hrs : 0;
+      const prevPay    = prevSummary ? prevSummary.hourly_pay : 0;
+      subTr.innerHTML = `
+        <td colspan="10" style="color:#1F3864; padding:6px 14px;">↳ ${prevWorker} — WEEK TOTAL</td>
+        <td style="background:#BDD7EE; color:#1F3864; font-weight:700;">${prevNetHrs.toFixed(2)}</td>
+        <td></td><td></td>
+        <td style="background:#BDD7EE; color:#1F3864; font-weight:700;">${fmtMoney(prevPay)}</td>
+      `;
+      shiftsTbody.appendChild(subTr);
+      grandNetHrs += prevNetHrs;
+      grandPay    += prevPay;
+    }
+
+    // Grand total row
+    const grandTr = document.createElement('tr');
+    grandTr.style.cssText = 'background:#1E5631; color:#fff; font-weight:700; font-size:13px;';
+    grandTr.innerHTML = `
+      <td colspan="10" style="padding:8px 14px; color:#fff;">GRAND TOTAL</td>
+      <td style="color:#fff; padding:8px 14px;">${grandNetHrs.toFixed(2)}</td>
+      <td></td><td></td>
+      <td style="color:#fff; padding:8px 14px;">${fmtMoney(grandPay)}</td>
+    `;
+    shiftsTbody.appendChild(grandTr);
+  }
+
+  // ── SUMMARY VIEW ─────────────────────────────────────────
+  summaryTbody.innerHTML = '';
+  let hasFlags = false;
+  (summaries || []).forEach(s => {
+    if (s.has_flag) hasFlags = true;
+    const tr = document.createElement('tr');
+    const config = WORKER_CONFIG[s.worker_name] || {};
+    tr.innerHTML = `
+      <td><strong>${s.worker_name}</strong></td>
+      <td>${config.role || 'Piece Rate'}</td>
+      <td class="td-hrs">${s.net_hrs > 0 ? s.net_hrs.toFixed(2) : '—'}</td>
+      <td class="td-money">${s.hourly_pay > 0 ? fmtMoney(s.hourly_pay) : '—'}</td>
+      <td style="color:var(--purple); font-weight:600;">${s.piece_pay > 0 ? fmtMoney(s.piece_pay) : '—'}</td>
+      <td class="td-money" style="font-size:14px;">${fmtMoney(s.total_pay)}</td>
+      <td class="td-flag">${s.has_flag ? '🚩' : ''}</td>
+    `;
+    summaryTbody.appendChild(tr);
+  });
+
+  if (!summaries || summaries.length === 0) {
+    summaryTbody.innerHTML = '<tr><td colspan="7" style="padding:32px; text-align:center; color:var(--gray-400)">No data for this week</td></tr>';
+  }
+
+  // ── FLAGS ────────────────────────────────────────────────
+  const flagsSection = document.getElementById('flags-section');
+  if (hasFlags) {
+    flagsSection.style.display = 'block';
+    const { data: flagSubs } = await sb.from('piece_submissions')
+      .select('*').eq('week_id', weekId).neq('issue', '');
+    const ftbody = document.getElementById('flags-table');
+    ftbody.innerHTML = '';
+    (flagSubs || []).forEach(f => {
+      const tr = document.createElement('tr');
+      tr.style.background = 'var(--red-light)';
+      tr.innerHTML = `
+        <td>${f.worker_name}</td>
+        <td class="td-muted">${fmtDate(f.work_date)}</td>
+        <td>${f.bol_number}</td>
+        <td>${f.customer_name} | ${f.size} | ${f.prod_type}</td>
+        <td>${f.qty}</td>
+        <td style="color:var(--red); font-weight:600;">${f.issue}</td>
+      `;
+      ftbody.appendChild(tr);
+    });
+  } else {
+    flagsSection.style.display = 'none';
+  }
+}
+
+// Save edits to clock-in/out back to Supabase
+async function saveShiftEdit(shiftId, field, value) {
+  const update = {};
+  update[field] = value;
+  const { error } = await sb.from('hourly_shifts').update(update).eq('id', shiftId);
+  if (error) {
+    alert('Could not save: ' + error.message);
+  }
+  // Reload to recalculate
+  loadWorkersTab();
+}
+
+// ── HISTORY ───────────────────────────────────────────────────
+async function loadHistory() {
+  const { data: weeks } = await sb.from('week_periods')
+    .select('*').order('week_start', { ascending: false });
+
+  const tbody = document.getElementById('history-table');
+  tbody.innerHTML = '';
+
+  if (!weeks || weeks.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" style="padding:32px; text-align:center; color:var(--gray-400)">No weeks processed yet</td></tr>';
+    return;
+  }
+
+  for (const week of weeks) {
+    const { data: sums } = await sb.from('worker_week_summary')
+      .select('worker_name, net_hrs, hourly_pay, piece_pay, total_pay')
+      .eq('week_id', week.id);
+
+    const totHrs     = (sums || []).reduce((s, r) => s + (r.net_hrs    || 0), 0);
+    const totHourly  = (sums || []).reduce((s, r) => s + (r.hourly_pay || 0), 0);
+    const totPiece   = (sums || []).reduce((s, r) => s + (r.piece_pay  || 0), 0);
+    const totPay     = (sums || []).reduce((s, r) => s + (r.total_pay  || 0), 0);
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><strong>${week.label}</strong></td>
+      <td><span class="chip ${week.status === 'final' ? 'chip-green' : 'chip-amber'}">${week.status}</span></td>
+      <td>${(sums || []).length}</td>
+      <td class="td-hrs">${totHrs.toFixed(2)}</td>
+      <td class="td-money">${fmtMoney(totHourly)}</td>
+      <td style="color:var(--purple); font-weight:600;">${fmtMoney(totPiece)}</td>
+      <td class="td-money" style="font-size:14px;">${fmtMoney(totPay)}</td>
+      <td><button class="btn btn-outline btn-sm" onclick="viewWeek('${week.id}')">View</button></td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+function viewWeek(weekId) {
+  document.getElementById('workers-week-select').value = weekId;
+  nav('workers');
+  loadWorkersTab();
+}
+
+// ── SUBMISSIONS ───────────────────────────────────────────────
+async function loadSubmissions() {
+  const { data } = await sb.from('piece_submissions')
+    .select('*').order('submitted_at', { ascending: false });
+  allSubmissions = data || [];
+  renderSubmissions(allSubmissions);
+}
+
+function filterSubmissions() {
+  const search  = document.getElementById('sub-search').value.toLowerCase();
+  const weekId  = document.getElementById('sub-filter-week').value;
+  let filtered  = allSubmissions;
+  if (search)  filtered = filtered.filter(s => s.worker_name.toLowerCase().includes(search) || s.bol_number.includes(search));
+  if (weekId)  filtered = filtered.filter(s => s.week_id === weekId);
+  renderSubmissions(filtered);
+}
+
+function renderSubmissions(subs) {
+  const tbody = document.getElementById('submissions-table');
+  tbody.innerHTML = '';
+  if (!subs || subs.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="10" style="padding:32px; text-align:center; color:var(--gray-400)">No submissions found</td></tr>';
+    return;
+  }
+  subs.forEach(s => {
+    const tr = document.createElement('tr');
+    if (s.issue) tr.style.background = 'var(--red-light)';
+    tr.innerHTML = `
+      <td><strong>${s.worker_name}</strong>${s.is_late ? ' <span class="chip chip-amber">🕐 Late</span>' : ''}</td>
+      <td class="td-muted">${fmtDate(s.work_date)}</td>
+      <td>${s.bol_number}</td>
+      <td>${s.customer_name}</td>
+      <td>${s.size} | <span class="chip ${s.prod_type === 'team' ? 'chip-purple' : 'chip-green'}">${s.prod_type}</span></td>
+      <td>${s.qty}</td>
+      <td class="td-muted">${s.bol_qty || '—'}</td>
+      <td class="td-muted">${s.rate ? '$' + Number(s.rate).toFixed(4) : '—'}</td>
+      <td class="td-money">${s.earnings ? fmtMoney(s.earnings) : '—'}</td>
+      <td class="td-flag">${s.issue ? '🚩' : ''}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+// ── MASTER RATES ──────────────────────────────────────────────
+async function loadRates() {
+  const { data } = await sb.from('master_rates').select('*').order('customer_name').order('size');
+  const tbody = document.getElementById('rates-table');
+  tbody.innerHTML = '';
+  if (!data || data.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" style="padding:32px; text-align:center; color:var(--gray-400)">No rates added yet</td></tr>';
+    return;
+  }
+  data.forEach(r => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${r.customer_name}</td>
+      <td><span class="chip ${r.prod_type === 'team' ? 'chip-purple' : 'chip-green'}">${r.prod_type}</span></td>
+      <td>${r.size}</td>
+      <td class="td-money">$${Number(r.rate).toFixed(4)}</td>
+      <td><button class="btn btn-outline btn-sm" style="color:var(--red);" onclick="deleteRate('${r.id}')">Delete</button></td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+async function addRate() {
+  const customer = document.getElementById('rate-customer').value.trim();
+  const type     = document.getElementById('rate-type').value;
+  const size     = document.getElementById('rate-size').value.trim();
+  const rate     = parseFloat(document.getElementById('rate-value').value);
+  const sucEl    = document.getElementById('rate-success');
+  const errEl    = document.getElementById('rate-error');
+  sucEl.style.display = 'none'; errEl.style.display = 'none';
+
+  if (!customer || !size || isNaN(rate)) {
+    errEl.textContent = 'Please fill in all fields.'; errEl.style.display = 'flex'; return;
+  }
+
+  const { error } = await sb.from('master_rates').upsert({
+    customer_name: customer, prod_type: type, size: size,
+    rate: rate, updated_at: new Date().toISOString()
+  }, { onConflict: 'customer_name,prod_type,size' });
+
+  if (error) { errEl.textContent = error.message; errEl.style.display = 'flex'; }
+  else {
+    sucEl.textContent = '✅ Rate saved: ' + customer + ' | ' + size + ' | ' + type + ' = $' + rate.toFixed(4);
+    sucEl.style.display = 'flex';
+    document.getElementById('rate-customer').value = '';
+    document.getElementById('rate-size').value     = '';
+    document.getElementById('rate-value').value    = '';
+    loadRates();
+  }
+}
+
+async function deleteRate(id) {
+  if (!confirm('Delete this rate?')) return;
+  await sb.from('master_rates').delete().eq('id', id);
+  loadRates();
+}
+
+// ── PERFORMANCE ───────────────────────────────────────────────
+async function populateWorkerSelect() {
+  const sel = document.getElementById('perf-worker-select');
+  Object.keys(WORKER_CONFIG).sort().forEach(name => {
+    const opt = document.createElement('option');
+    opt.value = name; opt.textContent = name;
+    sel.appendChild(opt);
+  });
+}
+
+async function loadPerformance() {
+  const workerName = document.getElementById('perf-worker-select').value;
+
+  let query = sb.from('worker_week_summary')
+    .select('*, week_periods(label, week_start)')
+    .order('week_periods(week_start)', { ascending: false });
+  if (workerName) query = query.eq('worker_name', workerName);
+
+  const { data: summaries } = await query;
+
+  const rows = summaries || [];
+
+  const totalHrs   = rows.reduce((s, r) => s + (r.net_hrs    || 0), 0);
+  const totalPay   = rows.reduce((s, r) => s + (r.total_pay  || 0), 0);
+  const totalPieces= rows.reduce((s, r) => s + (r.pieces_built|| 0), 0);
+  const lateDays   = rows.reduce((s, r) => s + (r.late_days   || 0), 0);
+
+  document.getElementById('ps-hrs').textContent     = rows.length > 0 ? (totalHrs / rows.length).toFixed(1) : '—';
+  document.getElementById('ps-pieces').textContent  = totalPieces;
+  document.getElementById('ps-earnings').textContent = fmtMoney(totalPay);
+  document.getElementById('ps-late').textContent    = lateDays;
+
+  // Hours table
+  const htbody = document.getElementById('perf-hours-table');
+  htbody.innerHTML = '';
+  rows.forEach(r => {
+    const tr = document.createElement('tr');
+    const label = r.week_periods ? r.week_periods.label : '—';
+    tr.innerHTML = `
+      <td class="td-muted">${label}</td>
+      <td class="td-hrs">${(r.net_hrs || 0).toFixed(2)}</td>
+      <td>${r.late_days > 0 ? '<span class="chip chip-amber">' + r.late_days + ' late</span>' : '—'}</td>
+      <td class="td-money">${fmtMoney(r.hourly_pay)}</td>
+    `;
+    htbody.appendChild(tr);
+  });
+  if (rows.length === 0) htbody.innerHTML = '<tr><td colspan="4" style="padding:24px; text-align:center; color:var(--gray-400)">No data</td></tr>';
+
+  // Piece table
+  const ptbody = document.getElementById('perf-piece-table');
+  ptbody.innerHTML = '';
+  rows.forEach(r => {
+    if (!r.pieces_built && !r.piece_pay) return;
+    const tr = document.createElement('tr');
+    const label = r.week_periods ? r.week_periods.label : '—';
+    tr.innerHTML = `
+      <td class="td-muted">${label}</td>
+      <td>${r.pieces_built || 0}</td>
+      <td style="color:var(--purple); font-weight:600;">${fmtMoney(r.piece_pay)}</td>
+    `;
+    ptbody.appendChild(tr);
+  });
+  if (ptbody.innerHTML === '') ptbody.innerHTML = '<tr><td colspan="3" style="padding:24px; text-align:center; color:var(--gray-400)">No piece rate data</td></tr>';
+}
+
+// ── WORKER SUBMIT (public form) ───────────────────────────────
+async function submitProduction() {
+  const name     = document.getElementById('sub-name').value.trim();
+  const bol      = document.getElementById('sub-bol').value.trim();
+  const customer = document.getElementById('sub-customer').value.trim();
+  const size     = document.getElementById('sub-size').value.trim();
+  const bolQty   = parseInt(document.getElementById('sub-bol-qty').value) || 0;
+  const type     = document.getElementById('sub-type').value;
+  const qty      = parseInt(document.getElementById('sub-qty').value) || 0;
+  const date     = document.getElementById('sub-date').value;
+
+  const sucEl  = document.getElementById('submit-success');
+  const errEl  = document.getElementById('submit-error');
+  const btnText= document.getElementById('submit-btn-text');
+
+  sucEl.style.display = 'none'; errEl.style.display = 'none';
+
+  if (!name || !bol || !customer || !size || !qty || !date) {
+    errEl.textContent = 'Please fill in all fields.'; errEl.style.display = 'flex'; return;
+  }
+
+  btnText.innerHTML = '<div class="spinner" style="border-top-color:#fff"></div> Submitting...';
+
+  const workDate   = new Date(date + 'T00:00:00');
+  const submitDate = new Date();
+  const daysDiff   = Math.floor((submitDate - workDate) / (1000 * 60 * 60 * 24));
+  const isLate     = daysDiff > 7;
+
+  const { error } = await sb.from('piece_submissions').insert({
+    worker_name: name, bol_number: bol, customer_name: customer,
+    size: size, bol_qty: bolQty, prod_type: type,
+    qty: qty, work_date: date, is_late: isLate, issue: ''
+  });
+
+  if (error) {
+    errEl.textContent = 'Failed to submit: ' + error.message;
+    errEl.style.display = 'flex';
+  } else {
+    sucEl.style.display = 'flex';
+    document.getElementById('sub-name').value = '';
+    document.getElementById('sub-qty').value  = '';
+  }
+  btnText.textContent = 'Submit';
+}
+</script>
+</body>
+</html>
