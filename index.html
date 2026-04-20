@@ -794,7 +794,7 @@ function nav(page) {
     dashboard: 'Dashboard', 'run-payroll': 'Run Payroll',
     workers: 'Workers', history: 'Week History',
     submissions: 'Submissions', rates: 'Master Rates',
-    performance: 'Performance'
+    performance: 'Performance', staff: 'Staff'
   };
   document.getElementById('page-title').textContent = titles[page] || page;
 
@@ -809,6 +809,7 @@ function nav(page) {
   if (page === 'workers')     loadWorkersTab();
   if (page === 'submissions') loadSubmissions();
   if (page === 'performance') loadPerformance();
+  if (page === 'staff')       loadStaff();
 }
 
 // ── DASHBOARD ────────────────────────────────────────────────
@@ -1786,6 +1787,60 @@ async function loadPerformance() {
     ptbody.appendChild(tr);
   });
   if (ptbody.innerHTML === '') ptbody.innerHTML = '<tr><td colspan="3" style="padding:24px; text-align:center; color:var(--gray-400)">No piece rate data</td></tr>';
+}
+
+// ── STAFF ROSTER ──────────────────────────────────────────────
+async function loadStaff() {
+  const tbody = document.getElementById('staff-table');
+  tbody.innerHTML = '<tr><td colspan="7" style="padding:32px; text-align:center; color:var(--gray-400)">Loading...</td></tr>';
+
+  // Fetch every worker from the Supabase workers table, A → Z by name
+  const { data: staff, error } = await sb.from('workers')
+    .select('*')
+    .order('name', { ascending: true });
+
+  if (error) {
+    tbody.innerHTML = '<tr><td colspan="7" style="padding:32px; text-align:center; color:var(--red)">Error loading staff: ' + error.message + '</td></tr>';
+    return;
+  }
+
+  if (!staff || staff.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" style="padding:32px; text-align:center; color:var(--gray-400)">No workers yet — click "+ Add Worker" to add one</td></tr>';
+    return;
+  }
+
+  // Friendly labels for the break_rule codes stored in the database
+  const breakLabels = {
+    standard:  'Standard (30/60/90)',
+    no_break:  'No break',
+    flat_30:   'Flat 30 min',
+    extended:  'Extended (30/60)',
+    capped_45: 'Capped at 45 min'
+  };
+
+  tbody.innerHTML = '';
+  staff.forEach(w => {
+    const tr = document.createElement('tr');
+    // Dim rows for retired workers so they're visually separated
+    if (!w.active) tr.style.opacity = '0.5';
+
+    tr.innerHTML = `
+      <td><strong>${w.name}</strong></td>
+      <td>${w.role || '—'}</td>
+      <td class="td-money">${fmtMoney(w.rate)}/hr</td>
+      <td>${breakLabels[w.break_rule] || w.break_rule}</td>
+      <td>${w.no_7am_cap ? '✅ Yes' : '—'}</td>
+      <td>
+        <span class="chip ${w.active ? 'chip-green' : 'chip-amber'}">
+          ${w.active ? 'Active' : 'Retired'}
+        </span>
+      </td>
+      <td style="text-align:right;">
+        <button class="btn btn-outline btn-sm" onclick="alert('Edit coming in Step 5')">Edit</button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
 }
 
 // ── WORKER SUBMIT (public form) ───────────────────────────────
