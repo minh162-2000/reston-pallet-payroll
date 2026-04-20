@@ -314,6 +314,9 @@
       <div class="nav-item" onclick="nav('rates')">
         <span class="icon">⚙️</span> Master Rates
       </div>
+      <div class="nav-item" onclick="nav('staff')">
+        <span class="icon">👥</span> Staff
+      </div>
     </div>
 
     <div class="nav-section">
@@ -596,6 +599,32 @@
               <button class="btn btn-green" onclick="addRate()">Add Rate</button>
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- ── STAFF ── -->
+      <div id="page-staff" class="page">
+        <div class="section-header">
+          <h3>Staff Roster</h3>
+          <button class="btn btn-green btn-sm" onclick="alert('Coming in Step 4')">+ Add Worker</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Role</th>
+                <th>Rate</th>
+                <th>Break Rule</th>
+                <th>Early Start?</th>
+                <th>Status</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="staff-table">
+              <tr><td colspan="7" style="padding:32px; text-align:center; color:var(--gray-400)">Loading...</td></tr>
+            </tbody>
+          </table>
         </div>
       </div>
 
