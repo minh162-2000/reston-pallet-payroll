@@ -1107,7 +1107,7 @@ async function processTracker() {
   infoEl.style.display = 'flex';
 }
 
-
+function detectWeek() {
   const csv = document.getElementById('csv-input').value.trim();
   if (!csv) { alert('Please paste CSV data first.'); return; }
 
