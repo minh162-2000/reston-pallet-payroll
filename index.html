@@ -1081,11 +1081,22 @@ document.addEventListener('DOMContentLoaded', function() {
   });
 });
 
-// Placeholder — real parser arrives in Step 3b
+// ── TRACKER THRESHOLDS (match the Google Apps Script) ────────
+// 7 AM is the "expected shift start" baseline.
+// ±10 min = on time (🟢), 11-30 min = yellow (🟡), >30 min = red (🔴)
+const TRACKER_SHIFT_START_HOUR = 7;
+const TRACKER_LATE_YELLOW      = 10;
+const TRACKER_LATE_RED         = 30;
+const TRACKER_EARLY_YELLOW     = -10;
+const TRACKER_EARLY_RED        = -30;
+
+// Main entry point — called when user clicks "Process Tracker File"
 async function processTracker() {
   const infoEl = document.getElementById('tracker-info');
   const errEl  = document.getElementById('tracker-error');
   const sucEl  = document.getElementById('tracker-success');
+  const btn    = document.getElementById('tracker-btn');
+  const btnTxt = document.getElementById('tracker-btn-text');
   infoEl.style.display = 'none';
   errEl.style.display  = 'none';
   sucEl.style.display  = 'none';
@@ -1095,16 +1106,293 @@ async function processTracker() {
     errEl.style.display = 'flex';
     return;
   }
-
-  // Quick sanity check — confirm SheetJS library loaded successfully
   if (typeof XLSX === 'undefined') {
     errEl.textContent = 'Excel reader library did not load. Check your internet connection and reload the page.';
     errEl.style.display = 'flex';
     return;
   }
 
-  infoEl.textContent = 'File ready: ' + trackerFile.name + ' (' + Math.round(trackerFile.size / 1024) + ' KB). Parser coming in next step.';
-  infoEl.style.display = 'flex';
+  btn.disabled = true;
+  btnTxt.innerHTML = '<div class="spinner"></div> Processing...';
+
+  try {
+    // 1) Read the xlsx file into a 2D array of cell values
+    const arrayBuf = await trackerFile.arrayBuffer();
+    const wb       = XLSX.read(arrayBuf, { type: 'array', cellDates: true });
+    const sheet    = wb.Sheets[wb.SheetNames[0]];
+    // header: 1 = return as rows/arrays (no auto-detected headers)
+    // defval: null = empty cells become null instead of being skipped
+    const rows     = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: false });
+
+    // 2) Walk the rows, collecting worker+date → aggregated zone data
+    const trackerMap  = parseTrackerRows(rows);
+    const trackerKeys = Object.keys(trackerMap);
+
+    if (trackerKeys.length === 0) {
+      errEl.textContent = 'No tracker data found in this file. Make sure it has the expected Name/Zone/Start/End layout.';
+      errEl.style.display = 'flex';
+      btn.disabled = false;
+      btnTxt.innerHTML = 'Process Tracker File';
+      return;
+    }
+
+    // 3) Load workers and their tracker_id mappings (for Name → HB name lookup)
+    await refreshWorkersCache();
+    const trackerIdToWorker = {};   // "Eric" → { name: "Eric Yeboah", ... }
+    for (const w of Object.values(workersByName)) {
+      if (w.tracker_id && w.is_tracked !== false) {
+        trackerIdToWorker[w.tracker_id] = w;
+      }
+    }
+
+    // 4) Figure out the date range covered by this tracker file
+    const allDates = trackerKeys.map(k => k.split('|')[1]).sort();
+    const startDate = allDates[0];
+    const endDate   = allDates[allDates.length - 1];
+
+    // 5) Fetch Homebase shifts in that date range — to compute diffs
+    const { data: hbShifts } = await sb.from('hourly_shifts')
+      .select('worker_name, shift_date, actual_in, clock_in, actual_out, clock_out')
+      .gte('shift_date', startDate)
+      .lte('shift_date', endDate);
+    // Build a lookup: "Eric Yeboah|2026-04-01" → shift row
+    const hbLookup = {};
+    (hbShifts || []).forEach(s => { hbLookup[s.worker_name + '|' + s.shift_date] = s; });
+
+    // 6) Build rows to insert into tracker_shifts — one per tracker entry
+    const insertRows = [];
+    let matchedCount = 0;   // had both tracker + HB entry
+    let skippedCount = 0;   // tracker name not mapped to any worker
+    let noHBCount    = 0;   // tracker entry but no HB shift that day
+
+    for (const key of trackerKeys) {
+      const [trName, dateStr] = key.split('|');
+      const worker = trackerIdToWorker[trName];
+      if (!worker) { skippedCount++; continue; }
+
+      const t       = trackerMap[key];
+      const hbShift = hbLookup[worker.name + '|' + dateStr];
+
+      // Compute diffs vs the 7 AM baseline (that's what the script uses — NOT actual HB clock-in)
+      const baseline = parseDateAtHour(dateStr, TRACKER_SHIFT_START_HOUR);
+      const hbOutDt  = hbShift ? parseHBTimeForTracker(hbShift.clock_out, dateStr) : null;
+
+      // Find the top zone (the zone with the most minutes)
+      let topZone = null, topMinutes = -1, topZoneFirst = null, topZoneLast = null;
+      for (const [zname, zd] of Object.entries(t.zones)) {
+        if (zd.mins > topMinutes) {
+          topMinutes = zd.mins;
+          topZone    = zname;
+          topZoneFirst = zd.first;
+          topZoneLast  = zd.last;
+        }
+      }
+
+      // Floor diffs
+      const floorDiffIn  = (baseline && t.floor) ? Math.round((t.floor.first - baseline) / 60000) : null;
+      const floorDiffOut = (hbOutDt  && t.floor) ? Math.round((t.floor.last  - hbOutDt)  / 60000) : null;
+
+      // Zone diffs (for the top zone)
+      const zoneDiffIn   = (baseline && topZoneFirst) ? Math.round((topZoneFirst - baseline) / 60000) : null;
+      const zoneDiffOut  = (hbOutDt  && topZoneLast)  ? Math.round((topZoneLast  - hbOutDt)  / 60000) : null;
+
+      // Status chip — use the worst (furthest from zero) of each direction
+      let status;
+      if (!hbShift) {
+        status = 'no_hb';
+        noHBCount++;
+      } else {
+        matchedCount++;
+        const inDiffs  = [floorDiffIn,  zoneDiffIn ].filter(v => v !== null);
+        const outDiffs = [floorDiffOut, zoneDiffOut].filter(v => v !== null);
+        const worstIn  = inDiffs.length  ? inDiffs.reduce( (a,b) => Math.abs(a)>Math.abs(b)?a:b) : null;
+        const worstOut = outDiffs.length ? outDiffs.reduce((a,b) => Math.abs(a)>Math.abs(b)?a:b) : null;
+        status = calcTrackerStatus(worstIn, worstOut);
+      }
+
+      insertRows.push({
+        worker_name:      worker.name,
+        shift_date:       dateStr,
+        first_seen:       t.first.toISOString(),
+        last_seen:        t.last.toISOString(),
+        floor_first:      t.floor ? t.floor.first.toISOString() : null,
+        floor_last:       t.floor ? t.floor.last.toISOString()  : null,
+        top_zone:         topZone,
+        top_zone_first:   topZoneFirst ? topZoneFirst.toISOString() : null,
+        top_zone_last:    topZoneLast  ? topZoneLast.toISOString()  : null,
+        top_zone_minutes: topMinutes > 0 ? topMinutes : null,
+        floor_diff_in:    floorDiffIn,
+        floor_diff_out:   floorDiffOut,
+        zone_diff_in:     zoneDiffIn,
+        zone_diff_out:    zoneDiffOut,
+        status:           status
+      });
+    }
+
+    // 7) Log this upload and save all the shift rows
+    const { data: uploadRow } = await sb.from('tracker_uploads').insert({
+      period_label:    startDate + ' to ' + endDate,
+      rows_parsed:     trackerKeys.length,
+      workers_matched: matchedCount,
+      filename:        trackerFile.name
+    }).select('id').single();
+
+    if (insertRows.length > 0) {
+      // Tag every row with the upload id for history tracking
+      const rowsWithUpload = insertRows.map(r => ({ ...r, tracker_upload_id: uploadRow ? uploadRow.id : null }));
+      // upsert replaces existing rows for the same worker+date (constraint we created in Step 1)
+      const { error: upErr } = await sb.from('tracker_shifts')
+        .upsert(rowsWithUpload, { onConflict: 'worker_name,shift_date' });
+      if (upErr) throw new Error('Save failed: ' + upErr.message);
+    }
+
+    // 8) Show summary
+    const redFlags = insertRows.filter(r => r.status && r.status.includes('red')).length;
+    sucEl.innerHTML =
+      '✅ Tracker processed for ' + startDate + ' to ' + endDate + '<br>' +
+      '&nbsp;&nbsp;• ' + matchedCount + ' shifts matched to Homebase<br>' +
+      (noHBCount    > 0 ? '&nbsp;&nbsp;• ⚠️ ' + noHBCount    + ' tracker entries without a Homebase shift<br>' : '') +
+      (skippedCount > 0 ? '&nbsp;&nbsp;• ⏭️ ' + skippedCount + ' tracker entries for unmapped workers (no Tracker ID in Staff)<br>' : '') +
+      (redFlags     > 0 ? '&nbsp;&nbsp;• 🔴 ' + redFlags     + ' red flags (late >30 min or left >30 min early)' : '');
+    sucEl.style.display = 'flex';
+
+    // Reset the file picker so re-uploading works cleanly
+    trackerFile = null;
+    document.getElementById('tracker-drop-label').textContent = 'Drop tracker .xlsx file here';
+    document.getElementById('tracker-drop-zone').style.borderColor = 'var(--gray-200)';
+    document.getElementById('tracker-drop-zone').style.background  = 'var(--gray-50)';
+    document.getElementById('tracker-file').value = '';
+
+  } catch (err) {
+    errEl.textContent = 'Error: ' + err.message;
+    errEl.style.display = 'flex';
+    console.error(err);
+  }
+
+  btn.disabled = false;
+  btnTxt.innerHTML = 'Process Tracker File';
+}
+
+// ── PARSER: walks rows, returns { "tracker_name|yyyy-mm-dd": {...} } ────
+function parseTrackerRows(rows) {
+  const result = {};
+  let curWorker = null;
+  let curDate   = null;
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i] || [];
+    const c0 = String(row[0] || '').trim();
+    const c1 = String(row[1] || '').trim();
+    const c2 = row[2];
+    const c3 = row[3];
+
+    // "Name" rows start a new worker block
+    if (c0 === 'Name') {
+      curWorker = String(row[1] || '').trim();
+      curDate = null;
+      continue;
+    }
+    // Header rows / summary rows / blank rows → skip
+    if (c0 === 'Date' || c0 === 'Weekly Summary' || c0.startsWith('Period')) continue;
+    if (c1 === 'Daily' || c1 === 'Weekly Summary' || c1 === 'Zone') continue;
+
+    // If col 0 has a date, update the "current day" for subsequent zone rows
+    if (row[0] !== null && row[0] !== '') {
+      const d = toDate(row[0]);
+      if (d) curDate = toDateKeyLocal(d);
+    }
+
+    // Zone row: col 1 = zone name, col 2 = start, col 3 = end
+    if (curWorker && curDate && c1 && c2 && c3) {
+      const s = toDate(c2);
+      const e = toDate(c3);
+      if (!s || !e || (e - s) < 2000) continue;  // skip spurious short pings
+
+      const key = curWorker + '|' + curDate;
+      if (!result[key]) result[key] = { first: s, last: e, floor: null, zones: {} };
+      const r = result[key];
+
+      if (s < r.first) r.first = s;
+      if (e > r.last)  r.last  = e;
+
+      const zoneName = c1;
+      const mins = Math.round((e - s) / 60000);
+
+      if (zoneName.toLowerCase() === 'floor') {
+        if (!r.floor) {
+          r.floor = { first: s, last: e };
+        } else {
+          if (s < r.floor.first) r.floor.first = s;
+          if (e > r.floor.last)  r.floor.last  = e;
+        }
+      } else {
+        if (!r.zones[zoneName]) {
+          r.zones[zoneName] = { first: s, last: e, mins: mins };
+        } else {
+          const z = r.zones[zoneName];
+          if (s < z.first) z.first = s;
+          if (e > z.last)  z.last  = e;
+          z.mins += mins;
+        }
+      }
+    }
+  }
+  return result;
+}
+
+// ── HELPERS for tracker parsing ─────────────────────────────────
+function toDate(val) {
+  if (!val) return null;
+  if (val instanceof Date && !isNaN(val)) return val;
+  if (typeof val === 'number' && val > 1) {
+    // Excel serial date — convert to JS Date
+    const ms = (val - 25569) * 86400 * 1000;
+    const d = new Date(ms);
+    return isNaN(d) ? null : d;
+  }
+  const d = new Date(String(val).trim());
+  return isNaN(d) ? null : d;
+}
+
+function toDateKeyLocal(d) {
+  // Returns yyyy-mm-dd using local time components (not UTC — avoids timezone drift)
+  const y  = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, '0');
+  const da = String(d.getDate()).padStart(2, '0');
+  return y + '-' + mo + '-' + da;
+}
+
+function parseDateAtHour(dateStr, hour) {
+  // Build a Date object for "dateStr at hour:00:00" in local time
+  if (!dateStr) return null;
+  const parts = dateStr.split('-');
+  return new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]), hour, 0, 0, 0);
+}
+
+function parseHBTimeForTracker(timeStr, dateStr) {
+  // Homebase stores clock-out as "5:30pm" — parse with the given date
+  if (!timeStr || !dateStr) return null;
+  const hm = parseTime(timeStr);
+  if (!hm) return null;
+  const parts = dateStr.split('-');
+  return new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]), hm.h, hm.m, 0, 0);
+}
+
+function calcTrackerStatus(worstIn, worstOut) {
+  // Returns one of: 'on_time' | 'late_yellow' | 'late_red' | 'early_yellow' | 'early_red' | 'both_yellow' | 'both_red'
+  const lateRed    = (typeof worstIn  === 'number') && worstIn  > TRACKER_LATE_RED;
+  const earlyRed   = (typeof worstOut === 'number') && worstOut < TRACKER_EARLY_RED;
+  if (lateRed  && earlyRed)  return 'both_red';
+  if (lateRed)               return 'late_red';
+  if (earlyRed)              return 'early_red';
+
+  const lateYellow  = (typeof worstIn  === 'number') && worstIn  > TRACKER_LATE_YELLOW;
+  const earlyYellow = (typeof worstOut === 'number') && worstOut < TRACKER_EARLY_YELLOW;
+  if (lateYellow && earlyYellow) return 'both_yellow';
+  if (lateYellow) return 'late_yellow';
+  if (earlyYellow) return 'early_yellow';
+
+  return 'on_time';
 }
 
 function detectWeek() {
