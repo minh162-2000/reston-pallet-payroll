@@ -812,15 +812,15 @@ async function loadDashboard() {
     tr.innerHTML = `
       <td><strong>${s.worker_name}</strong></td>
       <td class="td-hrs">${(s.net_hrs || 0).toFixed(2)}</td>
-      <td class="td-money">$${(s.total_pay || 0).toFixed(2)}</td>
+      <td class="td-money">${fmtMoney(s.total_pay)}</td>
       <td class="td-flag">${s.has_flag ? '🚩' : ''}</td>
     `;
     tbody.appendChild(tr);
   });
 
-  document.getElementById('ds-total').textContent   = '$' + (totalHourly + totalPiece).toFixed(2);
-  document.getElementById('ds-hourly').textContent  = '$' + totalHourly.toFixed(2);
-  document.getElementById('ds-piece').textContent   = '$' + totalPiece.toFixed(2);
+  document.getElementById('ds-total').textContent   = fmtMoney(totalHourly + totalPiece);
+  document.getElementById('ds-hourly').textContent  = fmtMoney(totalHourly);
+  document.getElementById('ds-piece').textContent   = fmtMoney(totalPiece);
   document.getElementById('ds-workers').textContent = summaries.length;
   document.getElementById('ds-flags').textContent   = flagCount;
 
