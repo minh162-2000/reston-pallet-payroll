@@ -622,13 +622,14 @@
                     <th>Role</th>
                     <th>Rate</th>
                     <th>Break Rule</th>
+                    <th>Tracker ID</th>
                     <th>Early Start?</th>
                     <th>Status</th>
                     <th></th>
                   </tr>
                 </thead>
                 <tbody id="staff-table">
-                  <tr><td colspan="7" style="padding:32px; text-align:center; color:var(--gray-400)">Loading...</td></tr>
+                  <tr><td colspan="8" style="padding:32px; text-align:center; color:var(--gray-400)">Loading...</td></tr>
                 </tbody>
               </table>
             </div>
@@ -666,6 +667,20 @@
                   <option value="extended">Extended 30 / 60 (e.g. Chris, Pawel)</option>
                   <option value="capped_45">Capped at 45 min (e.g. Rajesh)</option>
                 </select>
+              </div>
+
+              <div class="form-group">
+                <label>Tracker ID</label>
+                <input type="text" id="staff-tracker-id" placeholder="e.g. Eric, Noe 34d9, Harman 03de" />
+                <div class="text-muted" style="margin-top:4px">The name that appears in your tracker xlsx file. Leave blank if this worker doesn't have a beacon.</div>
+              </div>
+
+              <div class="form-group">
+                <label style="display:flex; align-items:center; gap:8px; text-transform:none; letter-spacing:0; font-size:13px;">
+                  <input type="checkbox" id="staff-is-tracked" style="width:auto; margin:0;" checked />
+                  <span>This worker is tracked by beacon</span>
+                </label>
+                <div class="text-muted" style="margin-top:4px; margin-left:24px;">Uncheck for workers who don't use the tracker (Chris, Stan, Slade, etc.)</div>
               </div>
 
               <div class="form-group">
@@ -1931,7 +1946,7 @@ async function loadPerformance() {
 // ── STAFF ROSTER ──────────────────────────────────────────────
 async function loadStaff() {
   const tbody = document.getElementById('staff-table');
-  tbody.innerHTML = '<tr><td colspan="7" style="padding:32px; text-align:center; color:var(--gray-400)">Loading...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="8" style="padding:32px; text-align:center; color:var(--gray-400)">Loading...</td></tr>';
 
   // Fetch every worker from the Supabase workers table, A → Z by name
   const { data: staff, error } = await sb.from('workers')
@@ -1939,12 +1954,12 @@ async function loadStaff() {
     .order('name', { ascending: true });
 
   if (error) {
-    tbody.innerHTML = '<tr><td colspan="7" style="padding:32px; text-align:center; color:var(--red)">Error loading staff: ' + error.message + '</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" style="padding:32px; text-align:center; color:var(--red)">Error loading staff: ' + error.message + '</td></tr>';
     return;
   }
 
   if (!staff || staff.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" style="padding:32px; text-align:center; color:var(--gray-400)">No workers yet — click "+ Add Worker" to add one</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" style="padding:32px; text-align:center; color:var(--gray-400)">No workers yet — click "+ Add Worker" to add one</td></tr>';
     workersByName = {};
     return;
   }
@@ -1973,6 +1988,13 @@ async function loadStaff() {
       <td>${w.role || '—'}</td>
       <td class="td-money">${fmtMoney(w.rate)}/hr</td>
       <td>${breakLabels[w.break_rule] || w.break_rule}</td>
+      <td>${
+        w.is_tracked === false
+          ? '<span class="chip chip-amber">Not tracked</span>'
+          : (w.tracker_id
+              ? '<span style="font-family:monospace; font-size:12px; color:var(--gray-800);">' + w.tracker_id + '</span>'
+              : '<span class="td-muted">— not set —</span>')
+      }</td>
       <td>${w.no_7am_cap ? '✅ Yes' : '—'}</td>
       <td>
         <span class="chip ${w.active ? 'chip-green' : 'chip-amber'}">
@@ -2008,6 +2030,8 @@ function resetStaffForm() {
   document.getElementById('staff-role').value       = 'Misc';
   document.getElementById('staff-rate').value       = '';
   document.getElementById('staff-break-rule').value = 'standard';
+  document.getElementById('staff-tracker-id').value = '';
+  document.getElementById('staff-is-tracked').checked = true;
   document.getElementById('staff-no-7am').checked   = false;
   document.getElementById('staff-saturday').checked = false;
 
@@ -2036,6 +2060,8 @@ async function editStaff(id) {
   document.getElementById('staff-role').value       = worker.role || 'Misc';
   document.getElementById('staff-rate').value       = worker.rate;
   document.getElementById('staff-break-rule').value = worker.break_rule || 'standard';
+  document.getElementById('staff-tracker-id').value = worker.tracker_id || '';
+  document.getElementById('staff-is-tracked').checked = worker.is_tracked !== false;
   document.getElementById('staff-no-7am').checked   = !!worker.no_7am_cap;
   document.getElementById('staff-saturday').checked = !!worker.saturday_rule;
 
@@ -2053,6 +2079,8 @@ async function saveStaff() {
   const role       = document.getElementById('staff-role').value.trim() || 'Misc';
   const rate       = parseFloat(document.getElementById('staff-rate').value);
   const breakRule  = document.getElementById('staff-break-rule').value;
+  const trackerId  = document.getElementById('staff-tracker-id').value.trim() || null;
+  const isTracked  = document.getElementById('staff-is-tracked').checked;
   const no7amCap   = document.getElementById('staff-no-7am').checked;
   const saturday   = document.getElementById('staff-saturday').checked;
 
@@ -2077,6 +2105,8 @@ async function saveStaff() {
     role:          role,
     rate:          rate,
     break_rule:    breakRule,
+    tracker_id:    trackerId,
+    is_tracked:    isTracked,
     no_7am_cap:    no7amCap,
     saturday_rule: saturday
   };
