@@ -1646,14 +1646,22 @@ function parseCameraFile(workbook) {
       // Skip the "Totals / Avg" summary row
       if (typeof first === 'string' && first.trim().toLowerCase().startsWith('total')) continue;
 
-      // Parse the date (it may come back as a Date object or a string)
+      // Parse the date. SheetJS returns either a Date object or a string like "2026-04-13".
+      // CAREFUL: new Date("2026-04-13") is interpreted as UTC midnight, which shifts
+      // one day earlier in timezones west of UTC. We parse the string parts manually.
       let workDate;
       if (first instanceof Date) {
         workDate = toDateKeyLocal(first);
       } else {
-        const d = new Date(String(first));
-        if (isNaN(d)) continue;
-        workDate = toDateKeyLocal(d);
+        const s = String(first).trim();
+        const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (m) {
+          workDate = m[1] + '-' + m[2] + '-' + m[3];   // already in yyyy-mm-dd form
+        } else {
+          const d = new Date(s);
+          if (isNaN(d)) continue;
+          workDate = toDateKeyLocal(d);
+        }
       }
 
       const totalUnits = Number(row[1]) || 0;
