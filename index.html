@@ -197,6 +197,39 @@
     #main { margin-left: 0; }
     .grid-2, .grid-3 { grid-template-columns: 1fr; }
   }
+
+  /* ── PRINT STYLES — used by Print Slips page only ─────────── */
+  @media print {
+    /* Hide everything except the slip container */
+    #sidebar, #topbar, #login-page { display: none !important; }
+    #main { margin-left: 0 !important; padding: 0 !important; }
+    .page:not(#page-print-slips) { display: none !important; }
+    .no-print { display: none !important; }
+
+    /* Paper size: 24cm x 10cm, no margins */
+    @page {
+      size: 24cm 10cm;
+      margin: 0;
+    }
+
+    body { background: #fff !important; }
+
+    /* Each slip gets its own page, no margin collapse */
+    .print-slip {
+      page-break-after: always;
+      break-after: page;
+      width: 24cm;
+      height: 10cm;
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      overflow: hidden;
+    }
+    .print-slip:last-child {
+      page-break-after: auto;
+      break-after: auto;
+    }
+  }
 </style>
 </head>
 <body>
@@ -328,6 +361,9 @@
       <div class="nav-label">Insights</div>
       <div class="nav-item" onclick="nav('performance')">
         <span class="icon">📈</span> Performance
+      </div>
+      <div class="nav-item" onclick="nav('print-slips')">
+        <span class="icon">🖨️</span> Print Slips
       </div>
     </div>
 
@@ -976,6 +1012,33 @@
         </div>
       </div>
 
+      <!-- ── PRINT SLIPS ── -->
+      <div id="page-print-slips" class="page">
+        <!-- Controls — hidden when printing, only the slips print -->
+        <div class="no-print" style="display:flex; align-items:center; gap:12px; margin-bottom:20px; flex-wrap:wrap;">
+          <label style="margin:0; font-size:13px; font-weight:600; color:var(--gray-600)">Week:</label>
+          <select id="slip-week-select" onchange="renderPrintSlips()" style="width:auto; padding:7px 12px; min-width:220px;">
+            <option value="">— Select a week —</option>
+          </select>
+          <span id="slip-summary" style="font-size:12px; color:var(--gray-400);"></span>
+          <div style="margin-left:auto;">
+            <button class="btn btn-primary btn-sm" onclick="window.print()">🖨️ Print</button>
+          </div>
+        </div>
+
+        <!-- Hint row — also hidden when printing -->
+        <div class="no-print" style="background:var(--gray-50); padding:12px 16px; border-radius:8px; font-size:12px; color:var(--gray-600); margin-bottom:16px;">
+          <strong>How to print:</strong> click the Print button above (or press Ctrl+P). In the print dialog, set paper size to <strong>24cm × 10cm</strong>, margins to <strong>None</strong>, scale to <strong>Fit to width</strong>. Each worker prints on a separate page.
+        </div>
+
+        <!-- The slips themselves — populated by renderPrintSlips() -->
+        <div id="slip-container">
+          <div style="padding:60px; text-align:center; color:var(--gray-400);">
+            Select a week above to generate slips.
+          </div>
+        </div>
+      </div>
+
     </div>
   </div>
 </div>
@@ -1101,7 +1164,8 @@ function nav(page) {
     workers: 'Hourly', history: 'Week History',
     submissions: 'Submissions', rates: 'Master Rates',
     performance: 'Performance', staff: 'Staff',
-    stations: 'Stations'
+    stations: 'Stations',
+    'print-slips': 'Print Slips'
   };
   document.getElementById('page-title').textContent = titles[page] || page;
 
@@ -1116,6 +1180,7 @@ function nav(page) {
   if (page === 'workers')     loadWorkersTab();
   if (page === 'submissions') loadSubmissions();
   if (page === 'performance') loadPerformancePage();
+  if (page === 'print-slips') loadPrintSlipsPage();
   if (page === 'staff')       loadStaff();
   if (page === 'stations')    loadStations();
 }
@@ -2951,6 +3016,71 @@ function setPerfView(view) {
 async function loadPerformancePage() {
   setPerfView('dashboard');
 }
+
+// ══════════════════════════════════════════════════════════════
+// PRINT SLIPS — Phase 5
+// ══════════════════════════════════════════════════════════════
+
+// Entry point — called when user nav's to Print Slips
+async function loadPrintSlipsPage() {
+  await populateSlipWeekSelect();
+}
+
+// Fill the slip-page week dropdown (same logic as performance page — newest first)
+async function populateSlipWeekSelect() {
+  const sel = document.getElementById('slip-week-select');
+  if (sel.dataset.populated === 'true') {
+    // Just re-render in case data changed
+    if (sel.value) renderPrintSlips();
+    return;
+  }
+
+  const { data: weeks, error } = await sb.from('week_periods')
+    .select('*')
+    .order('week_start', { ascending: false });
+
+  if (error || !weeks || weeks.length === 0) {
+    sel.innerHTML = '<option value="">— No weeks available —</option>';
+    return;
+  }
+
+  sel.innerHTML = '';
+  weeks.forEach((w, i) => {
+    const opt = document.createElement('option');
+    opt.value = w.id;
+    opt.dataset.weekStart = w.week_start;
+    opt.dataset.weekEnd   = w.week_end;
+    opt.dataset.weekLabel = w.label || (w.week_start + ' → ' + w.week_end);
+    opt.textContent = w.label || (w.week_start + ' → ' + w.week_end);
+    if (i === 0) opt.selected = true;
+    sel.appendChild(opt);
+  });
+
+  sel.dataset.populated = 'true';
+  renderPrintSlips();
+}
+
+// STEP 1 stub — Step 2 will fetch data and render actual slips here.
+// For now, just proves the week selection is working.
+async function renderPrintSlips() {
+  const sel = document.getElementById('slip-week-select');
+  if (!sel.value) return;
+
+  const selOpt   = sel.options[sel.selectedIndex];
+  const weekLabel = selOpt.dataset.weekLabel;
+
+  const container = document.getElementById('slip-container');
+  container.innerHTML = '<div style="padding:60px; text-align:center; color:var(--gray-400);">'
+    + 'Week selected: <strong>' + weekLabel + '</strong><br>'
+    + '<span style="font-size:12px;">Slip rendering coming in Step 2.</span>'
+    + '</div>';
+
+  document.getElementById('slip-summary').textContent = '';
+}
+
+// ══════════════════════════════════════════════════════════════
+// END PRINT SLIPS
+// ══════════════════════════════════════════════════════════════
 
 // Fill the week dropdown with all available weeks from week_periods
 // (newest first). Default selects the most recent week.
