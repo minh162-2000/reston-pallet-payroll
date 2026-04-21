@@ -847,37 +847,130 @@
 
       <!-- ── PERFORMANCE ── -->
       <div id="page-performance" class="page">
-        <div style="display:flex; align-items:center; gap:12px; margin-bottom:20px;">
-          <label style="margin:0; font-size:13px; font-weight:600; color:var(--gray-600)">Worker:</label>
-          <select id="perf-worker-select" onchange="loadPerformance()" style="width:220px;">
-            <option value="">— All Workers —</option>
-          </select>
+        <!-- Top controls: week selector (for Dashboard view) + view toggle -->
+        <div style="display:flex; align-items:center; gap:12px; margin-bottom:20px; flex-wrap:wrap;">
+          <!-- Week selector — only meaningful on Dashboard view -->
+          <div id="perf-dash-controls" style="display:flex; align-items:center; gap:12px;">
+            <label style="margin:0; font-size:13px; font-weight:600; color:var(--gray-600)">Week:</label>
+            <select id="perf-week-select" onchange="renderPerfDashboard()" style="width:auto; padding:7px 12px; min-width:220px;">
+              <option value="">— Select a week —</option>
+            </select>
+            <span id="perf-vs-label" style="font-size:12px; color:var(--gray-400);"></span>
+          </div>
+
+          <!-- Worker selector — only meaningful on Per-Worker view -->
+          <div id="perf-worker-controls" style="display:none; align-items:center; gap:12px;">
+            <label style="margin:0; font-size:13px; font-weight:600; color:var(--gray-600)">Worker:</label>
+            <select id="perf-worker-select" onchange="loadPerformance()" style="width:220px;">
+              <option value="">— All Workers —</option>
+            </select>
+          </div>
+
+          <!-- View toggle (like Hourly page) -->
+          <div style="margin-left:auto; display:flex; gap:6px;">
+            <button id="perf-tab-dashboard"  class="btn btn-primary btn-sm" onclick="setPerfView('dashboard')">📊 Dashboard</button>
+            <button id="perf-tab-perworker"  class="btn btn-outline btn-sm" onclick="setPerfView('perworker')">👤 Per-Worker</button>
+          </div>
         </div>
 
-        <div class="stat-grid" id="perf-stats">
-          <div class="stat-card"><div class="stat-label">Avg Hours/Week</div><div class="stat-value" id="ps-hrs">—</div></div>
-          <div class="stat-card"><div class="stat-label">Total Pieces Built</div><div class="stat-value" id="ps-pieces">—</div></div>
-          <div class="stat-card"><div class="stat-label">Total Earnings</div><div class="stat-value" id="ps-earnings">—</div></div>
-          <div class="stat-card"><div class="stat-label">Late Clock-ins</div><div class="stat-value" id="ps-late" style="color:var(--amber)">—</div></div>
-        </div>
-
-        <div class="grid-2" style="margin-top:8px;">
-          <div>
-            <div class="section-header"><h3>Hours by Week</h3></div>
-            <div class="table-wrap">
+        <!-- DASHBOARD VIEW (default) ──────────────────────── -->
+        <div id="perf-dashboard-view">
+          <!-- One card per department -->
+          <div class="card mb-16" id="dept-card-stripping">
+            <div class="card-title">✂️ Stripping</div>
+            <div class="table-wrap" style="margin-top:10px;">
               <table>
-                <thead><tr><th>Week</th><th>Net Hrs</th><th>Late Days</th><th>Hourly Pay</th></tr></thead>
-                <tbody id="perf-hours-table"><tr><td colspan="4" style="padding:24px; text-align:center; color:var(--gray-400)">Select a worker</td></tr></tbody>
+                <thead>
+                  <tr>
+                    <th style="width:32%;">Worker</th>
+                    <th style="text-align:right;">This Week</th>
+                    <th style="text-align:right;">Last Week</th>
+                    <th style="text-align:right;">Trend</th>
+                    <th>Punctuality</th>
+                  </tr>
+                </thead>
+                <tbody id="dept-stripping-body">
+                  <tr><td colspan="5" style="padding:20px; text-align:center; color:var(--gray-400)">Select a week above to load data</td></tr>
+                </tbody>
               </table>
             </div>
           </div>
-          <div>
-            <div class="section-header"><h3>Piece Rate by Week</h3></div>
-            <div class="table-wrap">
+
+          <div class="card mb-16" id="dept-card-trim">
+            <div class="card-title">✂️ Trim Track</div>
+            <div class="table-wrap" style="margin-top:10px;">
               <table>
-                <thead><tr><th>Week</th><th>Pieces</th><th>Earnings</th></tr></thead>
-                <tbody id="perf-piece-table"><tr><td colspan="3" style="padding:24px; text-align:center; color:var(--gray-400)">Select a worker</td></tr></tbody>
+                <thead>
+                  <tr>
+                    <th style="width:32%;">Worker</th>
+                    <th style="text-align:right;">This Week</th>
+                    <th style="text-align:right;">Last Week</th>
+                    <th style="text-align:right;">Trend</th>
+                    <th>Punctuality</th>
+                  </tr>
+                </thead>
+                <tbody id="dept-trim-body">
+                  <tr><td colspan="5" style="padding:20px; text-align:center; color:var(--gray-400)">Select a week above to load data</td></tr>
+                </tbody>
               </table>
+            </div>
+          </div>
+
+          <div class="card mb-16" id="dept-card-repair">
+            <div class="card-title">🔧 Repair</div>
+            <div class="table-wrap" style="margin-top:10px;">
+              <table>
+                <thead>
+                  <tr>
+                    <th style="width:32%;">Worker</th>
+                    <th style="text-align:right;">This Week</th>
+                    <th style="text-align:right;">Last Week</th>
+                    <th style="text-align:right;">Trend</th>
+                    <th>Punctuality</th>
+                  </tr>
+                </thead>
+                <tbody id="dept-repair-body">
+                  <tr><td colspan="5" style="padding:20px; text-align:center; color:var(--gray-400)">Select a week above to load data</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card mb-16" id="dept-card-build">
+            <div class="card-title">🏗️ Build <span style="font-weight:400; text-transform:none; letter-spacing:0; color:var(--gray-400); font-size:11px;">(coming once build data is connected)</span></div>
+            <div style="padding:20px; text-align:center; color:var(--gray-400); font-size:13px;">
+              Build submissions aren't connected to this dashboard yet.
+            </div>
+          </div>
+        </div>
+
+        <!-- PER-WORKER VIEW (old page preserved) ──────────────── -->
+        <div id="perf-perworker-view" style="display:none;">
+          <div class="stat-grid" id="perf-stats">
+            <div class="stat-card"><div class="stat-label">Avg Hours/Week</div><div class="stat-value" id="ps-hrs">—</div></div>
+            <div class="stat-card"><div class="stat-label">Total Pieces Built</div><div class="stat-value" id="ps-pieces">—</div></div>
+            <div class="stat-card"><div class="stat-label">Total Earnings</div><div class="stat-value" id="ps-earnings">—</div></div>
+            <div class="stat-card"><div class="stat-label">Late Clock-ins</div><div class="stat-value" id="ps-late" style="color:var(--amber)">—</div></div>
+          </div>
+
+          <div class="grid-2" style="margin-top:8px;">
+            <div>
+              <div class="section-header"><h3>Hours by Week</h3></div>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Week</th><th>Net Hrs</th><th>Late Days</th><th>Hourly Pay</th></tr></thead>
+                  <tbody id="perf-hours-table"><tr><td colspan="4" style="padding:24px; text-align:center; color:var(--gray-400)">Select a worker</td></tr></tbody>
+                </table>
+              </div>
+            </div>
+            <div>
+              <div class="section-header"><h3>Piece Rate by Week</h3></div>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Week</th><th>Pieces</th><th>Earnings</th></tr></thead>
+                  <tbody id="perf-piece-table"><tr><td colspan="3" style="padding:24px; text-align:center; color:var(--gray-400)">Select a worker</td></tr></tbody>
+                </table>
+              </div>
             </div>
           </div>
         </div>
@@ -1022,7 +1115,7 @@ function nav(page) {
   if (page === 'history')     loadHistory();
   if (page === 'workers')     loadWorkersTab();
   if (page === 'submissions') loadSubmissions();
-  if (page === 'performance') loadPerformance();
+  if (page === 'performance') loadPerformancePage();
   if (page === 'staff')       loadStaff();
   if (page === 'stations')    loadStations();
 }
@@ -2814,6 +2907,125 @@ async function populateWorkerSelect() {
     opt.value = name; opt.textContent = name;
     sel.appendChild(opt);
   });
+}
+
+// ══════════════════════════════════════════════════════════════
+// PERFORMANCE PAGE — Phase 4
+// Two views on one page: Dashboard (dept-wide) and Per-Worker (drill-down)
+// ══════════════════════════════════════════════════════════════
+
+// Toggle between the two views. Called when the user clicks a tab button.
+function setPerfView(view) {
+  const dashView = document.getElementById('perf-dashboard-view');
+  const pwView   = document.getElementById('perf-perworker-view');
+  const dashCtl  = document.getElementById('perf-dash-controls');
+  const pwCtl    = document.getElementById('perf-worker-controls');
+  const btnDash  = document.getElementById('perf-tab-dashboard');
+  const btnPw    = document.getElementById('perf-tab-perworker');
+
+  if (view === 'perworker') {
+    dashView.style.display = 'none';
+    pwView.style.display   = 'block';
+    dashCtl.style.display  = 'none';
+    pwCtl.style.display    = 'flex';
+    btnDash.classList.remove('btn-primary'); btnDash.classList.add('btn-outline');
+    btnPw.classList.remove('btn-outline');   btnPw.classList.add('btn-primary');
+    // Populate worker dropdown + load per-worker view
+    populatePerfWorkerSelect();
+    loadPerformance();
+  } else {
+    // default: dashboard
+    dashView.style.display = 'block';
+    pwView.style.display   = 'none';
+    dashCtl.style.display  = 'flex';
+    pwCtl.style.display    = 'none';
+    btnDash.classList.remove('btn-outline'); btnDash.classList.add('btn-primary');
+    btnPw.classList.remove('btn-primary');   btnPw.classList.add('btn-outline');
+    // Populate week dropdown (first time only) and render the dashboard
+    populatePerfWeekSelect();
+  }
+}
+
+// Called when navigating to the Performance page. Sets up the Dashboard view by default.
+// (Overrides the old behaviour where loadPerformance fired right away.)
+async function loadPerformancePage() {
+  setPerfView('dashboard');
+}
+
+// Fill the week dropdown with all available weeks from week_periods
+// (newest first). Default selects the most recent week.
+async function populatePerfWeekSelect() {
+  const sel = document.getElementById('perf-week-select');
+  // Only populate once — avoid flashing the dropdown on every render
+  if (sel.dataset.populated === 'true') {
+    renderPerfDashboard();
+    return;
+  }
+
+  const { data: weeks, error } = await sb.from('week_periods')
+    .select('*')
+    .order('week_start', { ascending: false });
+
+  if (error || !weeks || weeks.length === 0) {
+    sel.innerHTML = '<option value="">— No weeks available —</option>';
+    return;
+  }
+
+  sel.innerHTML = '';
+  weeks.forEach((w, i) => {
+    const opt = document.createElement('option');
+    opt.value = w.id;
+    // Store week_start + week_end on the option so later code doesn't have to re-fetch
+    opt.dataset.weekStart = w.week_start;
+    opt.dataset.weekEnd   = w.week_end;
+    opt.textContent = w.label || (w.week_start + ' → ' + w.week_end);
+    if (i === 0) opt.selected = true;
+    sel.appendChild(opt);
+  });
+
+  sel.dataset.populated = 'true';
+  renderPerfDashboard();
+}
+
+// Fill the per-worker dropdown — only runs when Per-Worker view is active
+async function populatePerfWorkerSelect() {
+  const sel = document.getElementById('perf-worker-select');
+  if (sel.dataset.populated === 'true') return;
+
+  const { data: workers } = await sb.from('workers')
+    .select('name, active')
+    .order('name');
+
+  sel.innerHTML = '<option value="">— All Workers —</option>';
+  (workers || []).forEach(w => {
+    const opt = document.createElement('option');
+    opt.value = w.name;
+    opt.textContent = w.name + (w.active === false ? ' (retired)' : '');
+    sel.appendChild(opt);
+  });
+  sel.dataset.populated = 'true';
+}
+
+// STEP 1 stub — actual dashboard rendering coming in Step 2.
+// For now this just shows a "coming in next step" message under each department.
+async function renderPerfDashboard() {
+  const weekSel = document.getElementById('perf-week-select');
+  if (!weekSel.value) return;
+
+  const placeholder = '<tr><td colspan="5" style="padding:20px; text-align:center; color:var(--gray-400)">Dashboard rendering wired up in Step 2 — data loader coming next.</td></tr>';
+  document.getElementById('dept-stripping-body').innerHTML = placeholder;
+  document.getElementById('dept-trim-body').innerHTML      = placeholder;
+  document.getElementById('dept-repair-body').innerHTML    = placeholder;
+
+  // Also show the prev-week label so user sees what we're comparing against
+  const vsLabel = document.getElementById('perf-vs-label');
+  const selOpt = weekSel.options[weekSel.selectedIndex];
+  const prevOpt = weekSel.options[weekSel.selectedIndex + 1];   // next option in list = prior week (descending sort)
+  if (prevOpt && prevOpt.value) {
+    vsLabel.textContent = 'Compare to: ' + prevOpt.textContent;
+  } else {
+    vsLabel.textContent = '(no prior week in history)';
+  }
 }
 
 async function loadPerformance() {
