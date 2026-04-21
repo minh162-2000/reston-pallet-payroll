@@ -3262,31 +3262,32 @@ function buildSlipHtml(name, ctx) {
                + trendLabel + '</div>';
   }
 
-  // The slip itself
-  // 24cm × 10cm = ~907px × 378px at 96dpi. We render at this size on screen too so it looks right.
-  return '<div class="print-slip" style="width:24cm; height:10cm; margin:0 auto 20px; background:#fff; border:1px solid #ddd; box-shadow:0 1px 3px rgba(0,0,0,0.08); font-family:Arial,sans-serif; color:#111; display:flex; flex-direction:column;">'
+  // The slip itself — uses block layout (NOT vertical flex) to avoid print rendering quirks.
+  // Dimensions: 24cm × 10cm. Content areas have explicit heights so everything lays out predictably in print.
+  return '<div class="print-slip" style="width:24cm; height:10cm; margin:0 auto 20px; background:#fff; border:1px solid #ddd; box-shadow:0 1px 3px rgba(0,0,0,0.08); font-family:Arial,sans-serif; color:#111;">'
 
-    // Header bar — navy blue with week label + department
-    + '<div style="background:#1F3864; color:#fff; padding:4px 12px; display:flex; justify-content:space-between; align-items:center; font-size:10px;">'
+    // Header bar — navy blue with week label + department (fixed height ~20px)
+    + '<div style="background:#1F3864; color:#fff; padding:4px 12px; display:flex; justify-content:space-between; align-items:center; font-size:10px; height:20px; box-sizing:border-box;">'
     +   '<span>' + ctx.weekLabel + '</span>'
     +   '<span style="opacity:0.85;">' + deptLabel + '</span>'
     + '</div>'
 
-    // Name
-    + '<div style="padding:6px 12px; border-bottom:1px solid #eee;">'
+    // Name (fixed height ~38px)
+    + '<div style="padding:6px 12px; border-bottom:1px solid #eee; height:38px; box-sizing:border-box;">'
     +   '<div style="font-size:18px; font-weight:800; color:#1F3864; letter-spacing:0.5px;">' + name.toUpperCase() + '</div>'
     + '</div>'
 
-    // Two-column body — Punctuality on the left, Output on the right (if any)
-    + '<div style="flex:1; display:flex; padding:8px 12px; gap:16px;">'
+    // Two-column body — fills the remaining height (10cm - 20px - 38px - 2px border ≈ 318px = ~320px)
+    // Using flex horizontally is fine; vertical flex was the thing causing print bugs.
+    + '<div style="display:flex; padding:8px 12px; gap:16px; height:320px; box-sizing:border-box;">'
 
-    +   '<div style="flex:' + (hasOutput ? '1.2' : '1') + '; min-width:0;">'
+    +   '<div style="flex:' + (hasOutput ? '1.2' : '1') + '; min-width:0; overflow:hidden;">'
     +     '<div style="font-size:9px; font-weight:800; letter-spacing:1px; color:#888; margin-bottom:4px;">PUNCTUALITY</div>'
     +     puncRowsHtml
     +   '</div>'
 
     +   (hasOutput
-          ? '<div style="flex:1; min-width:0; border-left:1px solid #eee; padding-left:16px;">'
+          ? '<div style="flex:1; min-width:0; border-left:1px solid #eee; padding-left:16px; overflow:hidden;">'
           +   '<div style="font-size:9px; font-weight:800; letter-spacing:1px; color:#888; margin-bottom:4px;">OUTPUT</div>'
           +   outputHtml
           + '</div>'
@@ -3300,7 +3301,20 @@ function buildSlipHtml(name, ctx) {
 // Format a yyyy-mm-dd date as "Mon Apr 13" etc — used in the slip punctuality rows.
 function formatShortDate(dateStr) {
   if (!dateStr) return '';
-  const [y, m, d] = dateStr.split('-').map(Number);
+  // Accept either 'yyyy-mm-dd' string OR a Date object
+  let y, m, d;
+  if (dateStr instanceof Date) {
+    y = dateStr.getFullYear();
+    m = dateStr.getMonth() + 1;
+    d = dateStr.getDate();
+  } else {
+    const s = String(dateStr);
+    const match = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!match) return s;  // fallback: just return whatever string we got
+    y = Number(match[1]);
+    m = Number(match[2]);
+    d = Number(match[3]);
+  }
   const dt = new Date(y, m - 1, d);
   const days   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
   const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
