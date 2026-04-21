@@ -3013,9 +3013,12 @@ async function renderPerfDashboard() {
   const weekSel = document.getElementById('perf-week-select');
   if (!weekSel.value) return;
 
-  const selOpt = weekSel.options[weekSel.selectedIndex];
+  const selOpt  = weekSel.options[weekSel.selectedIndex];
+  const prevOpt = weekSel.options[weekSel.selectedIndex + 1];   // next option in list = prior week (descending sort)
   const weekStart = selOpt.dataset.weekStart;
   const weekEnd   = selOpt.dataset.weekEnd;
+  const prevStart = prevOpt ? prevOpt.dataset.weekStart : null;
+  const prevEnd   = prevOpt ? prevOpt.dataset.weekEnd   : null;
 
   // Show loading state
   const loadingRow = '<tr><td colspan="5" style="padding:20px; text-align:center; color:var(--gray-400)">Loading…</td></tr>';
@@ -3025,27 +3028,57 @@ async function renderPerfDashboard() {
 
   // Update "Compare to:" label
   const vsLabel = document.getElementById('perf-vs-label');
-  const prevOpt = weekSel.options[weekSel.selectedIndex + 1];
   vsLabel.textContent = (prevOpt && prevOpt.value)
     ? 'Compare to: ' + prevOpt.textContent
     : '(no prior week in history)';
 
   // ── Fetch everything we need in parallel ────────────────────
   // 1. Camera rows for the week
-  // 2. All stations (so we know type + id → name lookup)
-  // 3. All station_worker links with worker details joined in
-  const [camResult, stResult, swResult] = await Promise.all([
+  // 2. Camera rows for the PRIOR week (for trend comparison)
+  // 3. All stations (so we know type + id → name lookup)
+  // 4. All station_worker links with worker details joined in
+  // 5. Tracker shifts for the week (for the Punctuality column)
+  // 6. Workers — need is_tracked flag to distinguish "untracked" vs "missing data"
+  const [camResult, prevCamResult, stResult, swResult, trResult, wkResult] = await Promise.all([
     sb.from('camera_daily')
       .select('station_id, work_date, total_units')
       .gte('work_date', weekStart)
       .lte('work_date', weekEnd),
+    prevStart && prevEnd
+      ? sb.from('camera_daily')
+          .select('station_id, work_date, total_units')
+          .gte('work_date', prevStart).lte('work_date', prevEnd)
+      : Promise.resolve({ data: [] }),
     sb.from('stations').select('id, name, station_type, active'),
-    sb.from('station_workers').select('station_id, worker_id, workers(id, name, active)')
+    sb.from('station_workers').select('station_id, worker_id, workers(id, name, active)'),
+    sb.from('tracker_shifts')
+      .select('worker_name, status')
+      .gte('shift_date', weekStart)
+      .lte('shift_date', weekEnd),
+    sb.from('workers').select('name, is_tracked')
   ]);
 
-  const camRows  = camResult.data || [];
-  const stations = stResult.data  || [];
-  const links    = swResult.data  || [];
+  const camRows    = camResult.data     || [];
+  const prevCamRows= prevCamResult.data || [];
+  const stations   = stResult.data      || [];
+  const links      = swResult.data      || [];
+  const trackerRows= trResult.data      || [];
+  const workersAll = wkResult.data      || [];
+
+  // Quick lookup: is this worker beacon-tracked? (false = show "n/a" chip)
+  const isTrackedByName = {};
+  workersAll.forEach(w => { isTrackedByName[w.name] = (w.is_tracked !== false); });
+
+  // Aggregate tracker shifts: { 'Eric Yeboah': { green: 5, yellow: 1, red: 0 } }
+  const puncByWorker = {};
+  trackerRows.forEach(t => {
+    if (!puncByWorker[t.worker_name]) puncByWorker[t.worker_name] = { green: 0, yellow: 0, red: 0 };
+    const s = t.status || '';
+    if (s === 'on_time')          puncByWorker[t.worker_name].green++;
+    else if (s.indexOf('red')    !== -1) puncByWorker[t.worker_name].red++;
+    else if (s.indexOf('yellow') !== -1) puncByWorker[t.worker_name].yellow++;
+    // 'no_hb' and anything else: don't count toward any category
+  });
 
   // Build a per-station lookup: { station_id: { type, workers: [{id, name}, ...] } }
   const stationInfo = {};
@@ -3057,36 +3090,53 @@ async function renderPerfDashboard() {
     }
   });
 
-  // ── Aggregate units per worker, grouped by station type ────
+  // ── Aggregate units per worker per department ──────────────
   // workerTotals = { 'stripping' | 'trim' | 'repair': { 'Morgan': 1513, ... } }
-  const workerTotals = { stripping: {}, trim: {}, repair: {}, other: {} };
-
-  camRows.forEach(c => {
-    const info = stationInfo[c.station_id];
-    if (!info) return;
-    const dept = info.type || 'other';
-    const bucket = workerTotals[dept] || workerTotals.other;
-
-    const workerCount = info.workers.length;
-    if (workerCount === 0) return;  // orphan station with no workers — ignore
-
-    // Split units equally among assigned workers (rounds to nearest int)
-    const unitsEach = Math.round((c.total_units || 0) / workerCount);
-    info.workers.forEach(w => {
-      bucket[w.name] = (bucket[w.name] || 0) + unitsEach;
+  // SUMS RAW station totals FIRST, then divides once at the end —
+  // (so Eric gets 19818/3 = 6606, not rounded per-day as 6605)
+  function aggregate(rows) {
+    const rawByStation = {};
+    rows.forEach(r => {
+      rawByStation[r.station_id] = (rawByStation[r.station_id] || 0) + (r.total_units || 0);
     });
-  });
+
+    const result = { stripping: {}, trim: {}, repair: {}, other: {} };
+    for (const [stationId, total] of Object.entries(rawByStation)) {
+      const info = stationInfo[stationId];
+      if (!info) continue;
+      const dept   = info.type || 'other';
+      const bucket = result[dept] || result.other;
+      const count  = info.workers.length;
+      if (count === 0) continue;
+      const unitsEach = Math.round(total / count);
+      info.workers.forEach(w => {
+        bucket[w.name] = (bucket[w.name] || 0) + unitsEach;
+      });
+    }
+    return result;
+  }
+
+  const thisTotals = aggregate(camRows);
+  const prevTotals = aggregate(prevCamRows);
 
   // ── Render each department table ──────────────────────────
-  renderDeptTable('dept-stripping-body', workerTotals.stripping);
-  renderDeptTable('dept-trim-body',      workerTotals.trim);
-  renderDeptTable('dept-repair-body',    workerTotals.repair);
+  // Pass through punctuality + prior-week totals so renderDeptTable can show chips and trends
+  renderDeptTable('dept-stripping-body', thisTotals.stripping, prevTotals.stripping, puncByWorker, isTrackedByName);
+  renderDeptTable('dept-trim-body',      thisTotals.trim,      prevTotals.trim,      puncByWorker, isTrackedByName);
+  renderDeptTable('dept-repair-body',    thisTotals.repair,    prevTotals.repair,    puncByWorker, isTrackedByName);
 }
 
 // Helper: writes rows into a department tbody. Handles empty state.
-function renderDeptTable(tbodyId, totalsByWorker) {
+// Now also renders the Last Week + Trend + Punctuality columns.
+function renderDeptTable(tbodyId, totalsByWorker, prevTotalsByWorker, puncByWorker, isTrackedByName) {
   const tbody = document.getElementById(tbodyId);
-  const names = Object.keys(totalsByWorker).sort();
+
+  // Collect names from BOTH weeks so we never hide someone who had data before.
+  // e.g. if a worker was active last week but missed this week, they should show up with ⚠️
+  const nameSet = new Set();
+  Object.keys(totalsByWorker     || {}).forEach(n => nameSet.add(n));
+  Object.keys(prevTotalsByWorker || {}).forEach(n => nameSet.add(n));
+  const names = [...nameSet].sort();
 
   if (names.length === 0) {
     tbody.innerHTML = '<tr><td colspan="5" style="padding:20px; text-align:center; color:var(--gray-400)">No camera data for this week</td></tr>';
@@ -3095,17 +3145,76 @@ function renderDeptTable(tbodyId, totalsByWorker) {
 
   tbody.innerHTML = '';
   names.forEach(name => {
-    const units = totalsByWorker[name];
+    const thisUnits = totalsByWorker[name]     || 0;
+    const lastUnits = prevTotalsByWorker[name] || 0;
+
+    // This Week cell
+    const thisCell = thisUnits > 0
+      ? '<strong style="color:#1F3864;">' + thisUnits.toLocaleString() + '</strong> <span style="color:#888; font-size:11px;">units</span>'
+      : '<span style="color:var(--gray-400);">—</span>';
+
+    // Last Week cell
+    const lastCell = lastUnits > 0
+      ? '<span style="color:#555;">' + lastUnits.toLocaleString() + '</span> <span style="color:#888; font-size:11px;">units</span>'
+      : '<span style="color:var(--gray-400);">—</span>';
+
+    // Trend chip — four cases
+    let trendChip;
+    if (thisUnits === 0 && lastUnits > 0) {
+      // Had data last week but nothing this week — concerning
+      trendChip = '<span style="background:#FFF3CC; color:#9A6C00; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600;">⚠️ No data</span>';
+    } else if (lastUnits === 0 && thisUnits > 0) {
+      // No prior data — new hire or first week
+      trendChip = '<span style="background:#D6E4F7; color:#1A5FA8; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600;">🆕 First week</span>';
+    } else if (thisUnits === 0 && lastUnits === 0) {
+      trendChip = '<span style="color:var(--gray-400); font-size:11px;">—</span>';
+    } else {
+      const delta = thisUnits - lastUnits;
+      const pct   = Math.round((delta / lastUnits) * 100);
+      if (pct > 0) {
+        trendChip = '<span style="background:#E2EFDA; color:#1E5631; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:700;">📈 +' + pct + '%</span>';
+      } else if (pct < 0) {
+        trendChip = '<span style="background:#FCE4D6; color:#C0392B; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:700;">📉 ' + pct + '%</span>';
+      } else {
+        trendChip = '<span style="background:#F2F2F2; color:#595959; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600;">➡️ Same</span>';
+      }
+    }
+
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td><strong>${name}</strong></td>
-      <td style="text-align:right; font-weight:600; color:#1F3864;">${units.toLocaleString()} <span style="color:#888; font-size:11px; font-weight:400;">units</span></td>
-      <td style="text-align:right; color:var(--gray-400);">—</td>
-      <td style="text-align:right; color:var(--gray-400);">—</td>
-      <td style="color:var(--gray-400); font-size:12px;">—</td>
+      <td style="text-align:right;">${thisCell}</td>
+      <td style="text-align:right;">${lastCell}</td>
+      <td style="text-align:right;">${trendChip}</td>
+      <td>${getPunctualityChips(name, puncByWorker, isTrackedByName)}</td>
     `;
     tbody.appendChild(tr);
   });
+}
+
+// Build the three small 🟢🟡🔴 chips for a worker's week.
+// Zero counts are dimmed to gray; positive counts use the full chip color.
+// Untracked workers get a small amber "not tracked" badge instead.
+function getPunctualityChips(name, puncByWorker, isTrackedByName) {
+  // Worker not tracked at all? (e.g., Stan, Chris, Slade)
+  if (isTrackedByName && isTrackedByName[name] === false) {
+    return '<span style="color:#9A6C00; background:#FFF3CC; font-size:10px; padding:2px 7px; border-radius:10px; font-weight:600;">not tracked</span>';
+  }
+  const p = (puncByWorker && puncByWorker[name]) || null;
+  // No tracker data at all this week (tracked worker, but beacon didn't register)
+  if (!p) {
+    return '<span style="color:var(--gray-400); font-size:12px;">— no tracker data —</span>';
+  }
+  const chip = (emoji, count, activeBg, activeFg) => {
+    const isZero = count === 0;
+    const bg = isZero ? '#F2F2F2'      : activeBg;
+    const fg = isZero ? 'var(--gray-400)' : activeFg;
+    return '<span style="display:inline-block; padding:2px 7px; margin-right:3px; border-radius:10px; background:' + bg + '; color:' + fg + '; font-size:11px; font-weight:700;">'
+         + emoji + ' ' + count + '</span>';
+  };
+  return chip('🟢', p.green,  '#E8F5E9', '#1E5631')
+       + chip('🟡', p.yellow, '#FFF3CC', '#9A6C00')
+       + chip('🔴', p.red,    '#FCE4D6', '#C0392B');
 }
 
 async function loadPerformance() {
