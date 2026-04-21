@@ -3228,10 +3228,11 @@ function buildSlipHtml(name, ctx) {
   }
 
   // Build output section — trend only, no numbers
-  let outputHtml;
-  if (!ctx.thisCam && !ctx.prevCam) {
-    outputHtml = '<div style="color:#999; font-size:10px; font-style:italic;">No camera output tracked</div>';
-  } else {
+  // Only render it if the worker actually has camera data this week or last week
+  const hasOutput = !!(ctx.thisCam || ctx.prevCam);
+
+  let outputHtml = '';
+  if (hasOutput) {
     const thisU = ctx.thisCam ? ctx.thisCam.units : 0;
     const lastU = ctx.prevCam ? ctx.prevCam.units : 0;
     let trendLabel, bg = '#E8F5E9', fg = '#1E5631';
@@ -3267,18 +3268,20 @@ function buildSlipHtml(name, ctx) {
     +   '<div style="font-size:18px; font-weight:800; color:#1F3864; letter-spacing:0.5px;">' + name.toUpperCase() + '</div>'
     + '</div>'
 
-    // Two-column body — Punctuality on the left, Output on the right
+    // Two-column body — Punctuality on the left, Output on the right (if any)
     + '<div style="flex:1; display:flex; padding:8px 12px; gap:16px;">'
 
-    +   '<div style="flex:1.2; min-width:0;">'
+    +   '<div style="flex:' + (hasOutput ? '1.2' : '1') + '; min-width:0;">'
     +     '<div style="font-size:9px; font-weight:800; letter-spacing:1px; color:#888; margin-bottom:4px;">PUNCTUALITY</div>'
     +     puncRowsHtml
     +   '</div>'
 
-    +   '<div style="flex:1; min-width:0; border-left:1px solid #eee; padding-left:16px;">'
-    +     '<div style="font-size:9px; font-weight:800; letter-spacing:1px; color:#888; margin-bottom:4px;">OUTPUT</div>'
-    +     outputHtml
-    +   '</div>'
+    +   (hasOutput
+          ? '<div style="flex:1; min-width:0; border-left:1px solid #eee; padding-left:16px;">'
+          +   '<div style="font-size:9px; font-weight:800; letter-spacing:1px; color:#888; margin-bottom:4px;">OUTPUT</div>'
+          +   outputHtml
+          + '</div>'
+          : '')
 
     + '</div>'
 
