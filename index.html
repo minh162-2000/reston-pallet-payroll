@@ -172,6 +172,7 @@
   .chip-purple { background: var(--purple-light); color: var(--purple); }
   .chip-red    { background: var(--red-light);    color: var(--red); }
   .chip-amber  { background: var(--amber-light);  color: #92400E; }
+  .chip-navy   { background: var(--navy);          color: #fff; }
   .spinner { display: inline-block; width: 18px; height: 18px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.7s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .empty-state { text-align: center; padding: 48px 24px; color: var(--gray-400); }
@@ -317,6 +318,9 @@
       </div>
       <div class="nav-item" onclick="nav('staff')">
         <span class="icon">🪪</span> Staff
+      </div>
+      <div class="nav-item" onclick="nav('stations')">
+        <span class="icon">📹</span> Stations
       </div>
     </div>
 
@@ -733,6 +737,87 @@
         </div>
       </div>
 
+      <!-- ── STATIONS ── -->
+      <div id="page-stations" class="page">
+        <div class="grid-2" style="align-items:start">
+          <!-- LEFT: Stations table -->
+          <div>
+            <div class="section-header">
+              <h3>Camera Stations</h3>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Station</th>
+                    <th>Type</th>
+                    <th>Assigned Workers</th>
+                    <th>Status</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="stations-table">
+                  <tr><td colspan="5" style="padding:32px; text-align:center; color:var(--gray-400)">Loading...</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="text-muted" style="margin-top:12px; font-size:12px;">
+              When multiple workers are assigned to a station, camera units are <strong>divided equally</strong> between them.
+            </div>
+          </div>
+
+          <!-- RIGHT: Add/Edit station form -->
+          <div>
+            <div class="card">
+              <div class="card-title" id="station-form-title">Add New Station</div>
+              <div id="station-success" class="alert alert-green" style="display:none; margin-top:12px"></div>
+              <div id="station-error"   class="alert alert-red"   style="display:none; margin-top:12px"></div>
+
+              <div class="form-group mt-16">
+                <label>Station Name *</label>
+                <input type="text" id="station-name" placeholder="e.g. Station 6" />
+                <div class="text-muted" style="margin-top:4px">Must match exactly how it appears in your camera upload file.</div>
+              </div>
+
+              <div class="form-group">
+                <label>Station Type</label>
+                <select id="station-type">
+                  <option value="stripping">Stripping</option>
+                  <option value="repair">Repair</option>
+                  <option value="trim">Trim</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label>Notes (optional)</label>
+                <input type="text" id="station-notes" placeholder="e.g. main floor, near loading dock" />
+              </div>
+
+              <!-- Assigned workers (only shown when editing) -->
+              <div class="form-group" id="station-workers-section" style="display:none;">
+                <label>Assigned Workers</label>
+                <div id="station-assigned-workers" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px; min-height:28px;">
+                  <!-- Filled in by JS — chips with × remove buttons -->
+                </div>
+                <div style="display:flex; gap:6px;">
+                  <select id="station-add-worker-select" style="flex:1;">
+                    <option value="">— Select worker to add —</option>
+                  </select>
+                  <button class="btn btn-outline btn-sm" onclick="addWorkerToCurrentStation()" type="button">+ Add</button>
+                </div>
+                <div class="text-muted" style="margin-top:4px">Units from this camera are divided equally between all assigned workers.</div>
+              </div>
+
+              <div class="mt-16" style="display:flex; gap:10px;">
+                <button class="btn btn-green"   id="station-save-btn"   onclick="saveStation()">Save Station</button>
+                <button class="btn btn-outline" id="station-cancel-btn" onclick="resetStationForm()" style="display:none;">Cancel</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- ── PERFORMANCE ── -->
       <div id="page-performance" class="page">
         <div style="display:flex; align-items:center; gap:12px; margin-bottom:20px;">
@@ -895,7 +980,8 @@ function nav(page) {
     dashboard: 'Dashboard', 'run-payroll': 'Run Payroll',
     workers: 'Hourly', history: 'Week History',
     submissions: 'Submissions', rates: 'Master Rates',
-    performance: 'Performance', staff: 'Staff'
+    performance: 'Performance', staff: 'Staff',
+    stations: 'Stations'
   };
   document.getElementById('page-title').textContent = titles[page] || page;
 
@@ -911,6 +997,7 @@ function nav(page) {
   if (page === 'submissions') loadSubmissions();
   if (page === 'performance') loadPerformance();
   if (page === 'staff')       loadStaff();
+  if (page === 'stations')    loadStations();
 }
 
 // ── DASHBOARD ────────────────────────────────────────────────
@@ -2677,6 +2764,298 @@ async function deleteStaff(id, name) {
 
   loadStaff();
 }
+
+// ══════════════════════════════════════════════════════════════
+// STATIONS ADMIN — Phase 2 Step 2
+// ══════════════════════════════════════════════════════════════
+let editingStationId = null;           // set to station's uuid when editing
+let editingStationWorkerIds = [];      // list of currently-assigned worker uuids in the form
+
+// ── Load + render the stations table ──
+async function loadStations() {
+  const tbody = document.getElementById('stations-table');
+  tbody.innerHTML = '<tr><td colspan="5" style="padding:32px; text-align:center; color:var(--gray-400)">Loading...</td></tr>';
+
+  // Fetch stations + their worker assignments in parallel
+  // We join station_workers + workers so we get worker names for display
+  const [{ data: stations, error: stErr }, { data: links, error: lkErr }] = await Promise.all([
+    sb.from('stations').select('*').order('name'),
+    sb.from('station_workers').select('station_id, worker_id, workers(name, active)')
+  ]);
+
+  if (stErr) {
+    tbody.innerHTML = '<tr><td colspan="5" style="padding:32px; text-align:center; color:var(--red)">Error: ' + stErr.message + '</td></tr>';
+    return;
+  }
+
+  if (!stations || stations.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" style="padding:32px; text-align:center; color:var(--gray-400)">No stations yet — click + Add to create one</td></tr>';
+    return;
+  }
+
+  // Build a per-station list of assigned worker objects: { station_id: [{id, name}, ...] }
+  const byStation = {};
+  (links || []).forEach(l => {
+    if (!byStation[l.station_id]) byStation[l.station_id] = [];
+    byStation[l.station_id].push({
+      id:     l.worker_id,
+      name:   l.workers ? l.workers.name   : '(unknown)',
+      active: l.workers ? l.workers.active : true
+    });
+  });
+
+  tbody.innerHTML = '';
+  stations.forEach(s => {
+    const assigned = byStation[s.id] || [];
+    const workerLabels = assigned.length === 0
+      ? '<span class="td-muted">— none assigned —</span>'
+      : assigned.map(w => {
+          const cls = w.active ? 'chip chip-navy' : 'chip chip-amber';
+          return '<span class="' + cls + '" style="margin:2px;">' + w.name + '</span>';
+        }).join(' ');
+
+    // Type label with a soft-coloured badge
+    const typeColors = { stripping:'#EBF3FF', repair:'#FDF4ED', trim:'#E7F5EA', other:'#F2F2F2' };
+    const typeLabel  = s.station_type
+      ? '<span style="background:' + (typeColors[s.station_type] || '#F2F2F2') + '; color:#555; font-size:11px; font-weight:600; padding:2px 8px; border-radius:10px; text-transform:capitalize;">' + s.station_type + '</span>'
+      : '<span class="td-muted">—</span>';
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><strong>${s.name}</strong>${s.notes ? '<div class="text-muted" style="font-size:11px;">' + s.notes + '</div>' : ''}</td>
+      <td>${typeLabel}</td>
+      <td>${workerLabels}</td>
+      <td>
+        <span class="chip ${s.active ? 'chip-green' : 'chip-amber'}">
+          ${s.active ? 'Active' : 'Retired'}
+        </span>
+      </td>
+      <td style="text-align:right; white-space:nowrap;">
+        <button class="btn btn-outline btn-sm" onclick="editStation('${s.id}')">Edit</button>
+        <button class="btn btn-outline btn-sm" onclick="toggleStationActive('${s.id}', ${s.active})" style="color:var(--amber);">
+          ${s.active ? 'Retire' : 'Reactivate'}
+        </button>
+        <button class="btn btn-outline btn-sm" onclick="deleteStation('${s.id}', '${(s.name || '').replace(/'/g, "\\'")}')" style="color:var(--red);">Delete</button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+// ── Reset the form back to "Add New Station" mode ──
+function resetStationForm() {
+  editingStationId = null;
+  editingStationWorkerIds = [];
+  document.getElementById('station-form-title').textContent = 'Add New Station';
+  document.getElementById('station-name').value  = '';
+  document.getElementById('station-type').value  = 'stripping';
+  document.getElementById('station-notes').value = '';
+  document.getElementById('station-workers-section').style.display = 'none';
+  document.getElementById('station-assigned-workers').innerHTML = '';
+  document.getElementById('station-cancel-btn').style.display = 'none';
+  document.getElementById('station-success').style.display = 'none';
+  document.getElementById('station-error').style.display   = 'none';
+}
+
+// ── Enter edit mode for a specific station ──
+async function editStation(stationId) {
+  // Fetch the station + its current worker assignments + the full worker roster (for the add dropdown)
+  const [{ data: station }, { data: links }, { data: allWorkers }] = await Promise.all([
+    sb.from('stations').select('*').eq('id', stationId).single(),
+    sb.from('station_workers').select('worker_id, workers(name)').eq('station_id', stationId),
+    sb.from('workers').select('id, name, active').eq('active', true).order('name')
+  ]);
+
+  if (!station) {
+    alert('Could not load station.');
+    return;
+  }
+
+  editingStationId = stationId;
+  editingStationWorkerIds = (links || []).map(l => l.worker_id);
+
+  document.getElementById('station-form-title').textContent = 'Edit ' + station.name;
+  document.getElementById('station-name').value  = station.name;
+  document.getElementById('station-type').value  = station.station_type || 'other';
+  document.getElementById('station-notes').value = station.notes || '';
+
+  // Show the workers section and fill it in
+  document.getElementById('station-workers-section').style.display = 'block';
+  renderAssignedWorkerChips(links || [], allWorkers || []);
+
+  document.getElementById('station-cancel-btn').style.display = 'inline-block';
+  document.getElementById('station-success').style.display = 'none';
+  document.getElementById('station-error').style.display   = 'none';
+  // Scroll the form into view so user isn't confused where edits happen
+  document.getElementById('station-form-title').scrollIntoView({ behavior:'smooth', block:'center' });
+}
+
+// ── Render the chip list of assigned workers + repopulate the add dropdown ──
+function renderAssignedWorkerChips(links, allWorkers) {
+  const wrap = document.getElementById('station-assigned-workers');
+  wrap.innerHTML = '';
+
+  if (editingStationWorkerIds.length === 0) {
+    wrap.innerHTML = '<span class="td-muted" style="font-size:12px; padding:4px 0;">No workers assigned yet</span>';
+  } else {
+    // Build a quick id → name lookup from the links (which include worker name via the join)
+    const nameById = {};
+    (links || []).forEach(l => { if (l.workers) nameById[l.worker_id] = l.workers.name; });
+    // For any workerId in editingStationWorkerIds that's not in links (freshly added this session),
+    // look it up from allWorkers
+    (allWorkers || []).forEach(w => { if (!nameById[w.id]) nameById[w.id] = w.name; });
+
+    editingStationWorkerIds.forEach(wid => {
+      const chip = document.createElement('span');
+      chip.className = 'chip chip-navy';
+      chip.style.cssText = 'display:inline-flex; align-items:center; gap:6px; margin:2px;';
+      chip.innerHTML = (nameById[wid] || '(unknown)')
+        + ' <span onclick="removeWorkerFromCurrentStation(\'' + wid + '\')" style="cursor:pointer; color:#fff; opacity:0.7; font-weight:900;" title="Remove">×</span>';
+      wrap.appendChild(chip);
+    });
+  }
+
+  // Populate the "add worker" dropdown — only show workers NOT already assigned
+  const sel = document.getElementById('station-add-worker-select');
+  sel.innerHTML = '<option value="">— Select worker to add —</option>';
+  (allWorkers || []).forEach(w => {
+    if (editingStationWorkerIds.indexOf(w.id) === -1) {
+      const opt = document.createElement('option');
+      opt.value = w.id;
+      opt.textContent = w.name;
+      sel.appendChild(opt);
+    }
+  });
+}
+
+// ── Add a worker to the editing station (in-memory; saves when form saves) ──
+async function addWorkerToCurrentStation() {
+  const sel = document.getElementById('station-add-worker-select');
+  const wid = sel.value;
+  if (!wid) return;
+
+  // Prevent duplicate adds
+  if (editingStationWorkerIds.indexOf(wid) !== -1) return;
+
+  // Immediately persist this link to the database so it's safe even if the user doesn't click Save
+  if (editingStationId) {
+    const { error } = await sb.from('station_workers').insert({
+      station_id: editingStationId,
+      worker_id:  wid
+    });
+    if (error) {
+      alert('Could not add worker: ' + error.message);
+      return;
+    }
+  }
+
+  editingStationWorkerIds.push(wid);
+
+  // Rebuild the chip list — we need to re-fetch the worker name
+  const { data: allWorkers } = await sb.from('workers').select('id, name, active').eq('active', true).order('name');
+  const { data: links } = await sb.from('station_workers').select('worker_id, workers(name)').eq('station_id', editingStationId);
+  renderAssignedWorkerChips(links || [], allWorkers || []);
+}
+
+// ── Remove a worker from the editing station ──
+async function removeWorkerFromCurrentStation(workerId) {
+  if (!editingStationId) return;
+
+  const { error } = await sb.from('station_workers')
+    .delete()
+    .eq('station_id', editingStationId)
+    .eq('worker_id',  workerId);
+
+  if (error) {
+    alert('Could not remove worker: ' + error.message);
+    return;
+  }
+
+  editingStationWorkerIds = editingStationWorkerIds.filter(id => id !== workerId);
+
+  const { data: allWorkers } = await sb.from('workers').select('id, name, active').eq('active', true).order('name');
+  const { data: links } = await sb.from('station_workers').select('worker_id, workers(name)').eq('station_id', editingStationId);
+  renderAssignedWorkerChips(links || [], allWorkers || []);
+  loadStations();  // refresh the main table too
+}
+
+// ── Save (insert or update) a station's basic fields ──
+async function saveStation() {
+  const name  = document.getElementById('station-name').value.trim();
+  const type  = document.getElementById('station-type').value;
+  const notes = document.getElementById('station-notes').value.trim();
+
+  const sucEl = document.getElementById('station-success');
+  const errEl = document.getElementById('station-error');
+  sucEl.style.display = 'none';
+  errEl.style.display = 'none';
+
+  if (!name) {
+    errEl.textContent = 'Please enter a station name.';
+    errEl.style.display = 'flex';
+    return;
+  }
+
+  const payload = { name: name, station_type: type, notes: notes || null };
+
+  let result;
+  if (editingStationId) {
+    // UPDATE existing
+    result = await sb.from('stations').update(payload).eq('id', editingStationId).select().single();
+  } else {
+    // INSERT new — default active to true
+    result = await sb.from('stations').insert({ ...payload, active: true }).select().single();
+  }
+
+  if (result.error) {
+    errEl.textContent = 'Error: ' + result.error.message;
+    errEl.style.display = 'flex';
+    return;
+  }
+
+  sucEl.textContent = editingStationId ? 'Station updated!' : 'Station created! You can now assign workers.';
+  sucEl.style.display = 'flex';
+
+  // If we just created a new station, switch into edit mode so the user can assign workers
+  if (!editingStationId) {
+    const newId = result.data.id;
+    await loadStations();
+    await editStation(newId);
+  } else {
+    await loadStations();
+  }
+}
+
+// ── Toggle active/retired ──
+async function toggleStationActive(stationId, currentlyActive) {
+  const { error } = await sb.from('stations')
+    .update({ active: !currentlyActive })
+    .eq('id', stationId);
+  if (error) {
+    alert('Could not update: ' + error.message);
+    return;
+  }
+  loadStations();
+}
+
+// ── Delete a station (with confirmation) ──
+async function deleteStation(stationId, stationName) {
+  const ok = confirm('Delete "' + stationName + '"?\n\nThis will also remove all camera data saved for this station. Worker assignments will be removed.\n\nYou can "Retire" instead to preserve history.');
+  if (!ok) return;
+
+  const { error } = await sb.from('stations').delete().eq('id', stationId);
+  if (error) {
+    alert('Could not delete: ' + error.message);
+    return;
+  }
+
+  if (editingStationId === stationId) resetStationForm();
+  loadStations();
+}
+
+// ══════════════════════════════════════════════════════════════
+// END STATIONS ADMIN
+// ══════════════════════════════════════════════════════════════
 
 // ── WORKER SUBMIT (public form) ───────────────────────────────
 async function submitProduction() {
