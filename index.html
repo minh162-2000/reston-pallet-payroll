@@ -206,7 +206,7 @@
     .page:not(#page-print-slips) { display: none !important; }
     .no-print { display: none !important; }
 
-    /* Paper size: 24cm x 10cm, no margins */
+    /* Paper size: 24cm x 10cm, no margins (user must select matching paper in print dialog) */
     @page {
       size: 24cm 10cm;
       margin: 0;
@@ -214,16 +214,19 @@
 
     body { background: #fff !important; }
 
-    /* Each slip gets its own page, no margin collapse */
+    /* When printing, kill margins and borders — let the slip fill the page */
     .print-slip {
       page-break-after: always;
       break-after: page;
-      width: 24cm;
-      height: 10cm;
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-      overflow: hidden;
+      width: 100% !important;
+      height: 10cm !important;
+      max-width: none !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      box-sizing: border-box !important;
+      border: none !important;
+      box-shadow: none !important;
+      background: #fff !important;
     }
     .print-slip:last-child {
       page-break-after: auto;
@@ -1027,8 +1030,14 @@
         </div>
 
         <!-- Hint row — also hidden when printing -->
-        <div class="no-print" style="background:var(--gray-50); padding:12px 16px; border-radius:8px; font-size:12px; color:var(--gray-600); margin-bottom:16px;">
-          <strong>How to print:</strong> click the Print button above (or press Ctrl+P). In the print dialog, set paper size to <strong>24cm × 10cm</strong>, margins to <strong>None</strong>, scale to <strong>Fit to width</strong>. Each worker prints on a separate page.
+        <div class="no-print" style="background:#FFF8E1; padding:12px 16px; border-radius:8px; font-size:12px; color:#6D5400; margin-bottom:16px; border-left:4px solid #FFC107;">
+          <strong>📐 Print settings required (click Print, then in the dialog):</strong>
+          <ol style="margin:6px 0 0 18px; padding:0;">
+            <li><strong>Paper size</strong> → More settings → Custom → Width <strong>24cm</strong>, Height <strong>10cm</strong> (or select an Envelope / DL preset if close)</li>
+            <li><strong>Margins</strong> → <strong>None</strong></li>
+            <li><strong>Scale</strong> → <strong>Default</strong> or Fit to page</li>
+            <li>Uncheck <strong>Headers and footers</strong> (removes the date/URL at top/bottom)</li>
+          </ol>
         </div>
 
         <!-- The slips themselves — populated by renderPrintSlips() -->
@@ -3255,7 +3264,7 @@ function buildSlipHtml(name, ctx) {
 
   // The slip itself
   // 24cm × 10cm = ~907px × 378px at 96dpi. We render at this size on screen too so it looks right.
-  return '<div class="print-slip" style="width:24cm; height:10cm; margin:0 auto 20px; background:#fff; border:1px solid #ddd; box-shadow:0 1px 3px rgba(0,0,0,0.08); font-family:Arial,sans-serif; color:#111; display:flex; flex-direction:column; overflow:hidden;">'
+  return '<div class="print-slip" style="width:24cm; height:10cm; margin:0 auto 20px; background:#fff; border:1px solid #ddd; box-shadow:0 1px 3px rgba(0,0,0,0.08); font-family:Arial,sans-serif; color:#111; display:flex; flex-direction:column;">'
 
     // Header bar — navy blue with week label + department
     + '<div style="background:#1F3864; color:#fff; padding:4px 12px; display:flex; justify-content:space-between; align-items:center; font-size:10px;">'
