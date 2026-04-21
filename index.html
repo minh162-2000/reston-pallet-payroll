@@ -3060,22 +3060,252 @@ async function populateSlipWeekSelect() {
   renderPrintSlips();
 }
 
-// STEP 1 stub — Step 2 will fetch data and render actual slips here.
-// For now, just proves the week selection is working.
+// Fetch data for the selected week, build one slip per worker, render into the container.
+// Workers without tracker OR camera data are skipped (per your choice).
 async function renderPrintSlips() {
   const sel = document.getElementById('slip-week-select');
   if (!sel.value) return;
 
-  const selOpt   = sel.options[sel.selectedIndex];
+  const selOpt    = sel.options[sel.selectedIndex];
+  const prevOpt   = sel.options[sel.selectedIndex + 1];
   const weekLabel = selOpt.dataset.weekLabel;
+  const weekStart = selOpt.dataset.weekStart;
+  const weekEnd   = selOpt.dataset.weekEnd;
+  const prevStart = prevOpt ? prevOpt.dataset.weekStart : null;
+  const prevEnd   = prevOpt ? prevOpt.dataset.weekEnd   : null;
 
   const container = document.getElementById('slip-container');
-  container.innerHTML = '<div style="padding:60px; text-align:center; color:var(--gray-400);">'
-    + 'Week selected: <strong>' + weekLabel + '</strong><br>'
-    + '<span style="font-size:12px;">Slip rendering coming in Step 2.</span>'
-    + '</div>';
+  const summary   = document.getElementById('slip-summary');
+  container.innerHTML = '<div style="padding:40px; text-align:center; color:var(--gray-400);">Loading…</div>';
 
-  document.getElementById('slip-summary').textContent = '';
+  // ── Fetch in parallel ────────────────────────────────
+  // Tracker shifts (this week) — for the daily punctuality rows
+  // Camera rows (this week + last week) — for the output trend
+  // Stations + station_workers — for matching camera units to workers + department types
+  // Workers — for active/tracked flags
+  const [trResult, camResult, prevCamResult, stResult, swResult, wkResult] = await Promise.all([
+    sb.from('tracker_shifts')
+      .select('worker_name, shift_date, status, zone_diff_in, zone_diff_out')
+      .gte('shift_date', weekStart).lte('shift_date', weekEnd)
+      .order('worker_name').order('shift_date'),
+    sb.from('camera_daily')
+      .select('station_id, work_date, total_units')
+      .gte('work_date', weekStart).lte('work_date', weekEnd),
+    prevStart && prevEnd
+      ? sb.from('camera_daily')
+          .select('station_id, work_date, total_units')
+          .gte('work_date', prevStart).lte('work_date', prevEnd)
+      : Promise.resolve({ data: [] }),
+    sb.from('stations').select('id, name, station_type, active'),
+    sb.from('station_workers').select('station_id, worker_id, workers(id, name, active)'),
+    sb.from('workers').select('name, is_tracked, active')
+  ]);
+
+  const trackerRows  = trResult.data     || [];
+  const camRows      = camResult.data    || [];
+  const prevCamRows  = prevCamResult.data || [];
+  const stations     = stResult.data     || [];
+  const links        = swResult.data     || [];
+  const workersAll   = wkResult.data     || [];
+
+  // Map worker name → { is_tracked, active }
+  const workerMeta = {};
+  workersAll.forEach(w => { workerMeta[w.name] = { tracked: w.is_tracked !== false, active: w.active !== false }; });
+
+  // Build per-station info
+  const stationInfo = {};
+  stations.forEach(s => { stationInfo[s.id] = { type: s.station_type, name: s.name, workers: [] }; });
+  links.forEach(l => {
+    if (!stationInfo[l.station_id]) return;
+    if (l.workers && l.workers.active !== false) {
+      stationInfo[l.station_id].workers.push(l.workers.name);
+    }
+  });
+
+  // Aggregate camera units per worker per department (sum then divide for clean rounding)
+  // Returns { 'Morgan': { units, dept }, ... }
+  function aggregateCamera(rows) {
+    const rawByStation = {};
+    rows.forEach(r => {
+      rawByStation[r.station_id] = (rawByStation[r.station_id] || 0) + (r.total_units || 0);
+    });
+    const perWorker = {};
+    for (const [stationId, total] of Object.entries(rawByStation)) {
+      const info = stationInfo[stationId];
+      if (!info) continue;
+      const count = info.workers.length;
+      if (count === 0) continue;
+      const unitsEach = Math.round(total / count);
+      info.workers.forEach(name => {
+        if (!perWorker[name]) perWorker[name] = { units: 0, dept: info.type || 'other' };
+        perWorker[name].units += unitsEach;
+      });
+    }
+    return perWorker;
+  }
+
+  const thisCamByWorker = aggregateCamera(camRows);
+  const prevCamByWorker = aggregateCamera(prevCamRows);
+
+  // Group tracker rows by worker — array of { date, status, diff_in, diff_out }
+  const trackerByWorker = {};
+  trackerRows.forEach(t => {
+    if (!trackerByWorker[t.worker_name]) trackerByWorker[t.worker_name] = [];
+    trackerByWorker[t.worker_name].push({
+      date: t.shift_date,
+      status: t.status,
+      diff_in: t.zone_diff_in,
+      diff_out: t.zone_diff_out
+    });
+  });
+
+  // ── Build the set of workers who need slips ────────────────
+  // Rule: worker gets a slip if they have tracker OR camera data this week
+  const workerSet = new Set();
+  Object.keys(trackerByWorker).forEach(n => workerSet.add(n));
+  Object.keys(thisCamByWorker).forEach(n => workerSet.add(n));
+
+  const workerNames = [...workerSet].sort();
+
+  if (workerNames.length === 0) {
+    container.innerHTML = '<div style="padding:60px; text-align:center; color:var(--gray-400);">No workers have tracker or camera data for this week.</div>';
+    summary.textContent = '';
+    return;
+  }
+
+  // ── Department labels for the header ────────────────────
+  function deptLabel(code) {
+    if (code === 'stripping') return '✂️ Stripping';
+    if (code === 'trim')      return '✂️ Trim Track';
+    if (code === 'repair')    return '🔧 Repair';
+    return '';
+  }
+
+  // ── Build slips ──────────────────────────────────────────
+  const slipsHtml = workerNames.map(name => buildSlipHtml(name, {
+    weekLabel,
+    weekStart, weekEnd,
+    tracker: trackerByWorker[name] || [],
+    thisCam: thisCamByWorker[name] || null,
+    prevCam: prevCamByWorker[name] || null,
+    meta:    workerMeta[name] || { tracked: true, active: true },
+    deptLabelFn: deptLabel
+  })).join('');
+
+  container.innerHTML = slipsHtml;
+  summary.textContent = workerNames.length + ' slip' + (workerNames.length === 1 ? '' : 's') + ' ready';
+}
+
+// Build the HTML for a single worker's slip.
+function buildSlipHtml(name, ctx) {
+  // Determine the department to show in the header
+  const dept = ctx.thisCam ? ctx.thisCam.dept : null;
+  const deptLabel = dept ? ctx.deptLabelFn(dept) : '';
+
+  // Build punctuality rows — one per tracker shift that week, chronological order
+  ctx.tracker.sort((a, b) => a.date < b.date ? -1 : 1);
+
+  let puncRowsHtml;
+  if (!ctx.meta.tracked) {
+    puncRowsHtml = '<div style="padding:6px 0; color:#999; font-size:10px; font-style:italic;">No beacon — punctuality not tracked</div>';
+  } else if (ctx.tracker.length === 0) {
+    puncRowsHtml = '<div style="padding:6px 0; color:#999; font-size:10px; font-style:italic;">No tracker data this week</div>';
+  } else {
+    puncRowsHtml = ctx.tracker.map(t => {
+      const dateLabel = formatShortDate(t.date);
+      const statusLabel = formatTrackerStatusShort(t.status, t.diff_in, t.diff_out);
+      // Colour the status label
+      let bg = '#E8F5E9', fg = '#1E5631';
+      if (t.status && t.status.indexOf('yellow') !== -1) { bg = '#FFF3CC'; fg = '#9A6C00'; }
+      else if (t.status && t.status.indexOf('red') !== -1){ bg = '#FCE4D6'; fg = '#C0392B'; }
+      else if (t.status === 'no_hb')                      { bg = '#F2F2F2'; fg = '#888'; }
+
+      return '<div style="display:flex; justify-content:space-between; padding:2px 0; font-size:10px;">'
+           + '<span style="color:#333;">' + dateLabel + '</span>'
+           + '<span style="background:' + bg + '; color:' + fg + '; padding:1px 6px; border-radius:8px; font-weight:600;">' + statusLabel + '</span>'
+           + '</div>';
+    }).join('');
+  }
+
+  // Build output section — trend only, no numbers
+  let outputHtml;
+  if (!ctx.thisCam && !ctx.prevCam) {
+    outputHtml = '<div style="color:#999; font-size:10px; font-style:italic;">No camera output tracked</div>';
+  } else {
+    const thisU = ctx.thisCam ? ctx.thisCam.units : 0;
+    const lastU = ctx.prevCam ? ctx.prevCam.units : 0;
+    let trendLabel, bg = '#E8F5E9', fg = '#1E5631';
+    if (thisU === 0 && lastU > 0) {
+      trendLabel = '⚠️ No output this week';  bg = '#FFF3CC'; fg = '#9A6C00';
+    } else if (lastU === 0 && thisU > 0) {
+      trendLabel = '🆕 First week';            bg = '#D6E4F7'; fg = '#1A5FA8';
+    } else if (thisU === 0 && lastU === 0) {
+      trendLabel = '—';                        bg = '#F2F2F2'; fg = '#888';
+    } else {
+      const delta = thisU - lastU;
+      const pct   = Math.round((delta / lastU) * 100);
+      if (pct > 0)      { trendLabel = '📈 +' + pct + '% vs last week'; }
+      else if (pct < 0) { trendLabel = '📉 ' + pct + '% vs last week';  bg = '#FCE4D6'; fg = '#C0392B'; }
+      else              { trendLabel = '➡️ Same as last week';           bg = '#F2F2F2'; fg = '#595959'; }
+    }
+    outputHtml = '<div style="background:' + bg + '; color:' + fg + '; padding:4px 10px; border-radius:6px; font-size:11px; font-weight:700; display:inline-block;">'
+               + trendLabel + '</div>';
+  }
+
+  // The slip itself
+  // 24cm × 10cm = ~907px × 378px at 96dpi. We render at this size on screen too so it looks right.
+  return '<div class="print-slip" style="width:24cm; height:10cm; margin:0 auto 20px; background:#fff; border:1px solid #ddd; box-shadow:0 1px 3px rgba(0,0,0,0.08); font-family:Arial,sans-serif; color:#111; display:flex; flex-direction:column; overflow:hidden;">'
+
+    // Header bar — navy blue with week label + department
+    + '<div style="background:#1F3864; color:#fff; padding:4px 12px; display:flex; justify-content:space-between; align-items:center; font-size:10px;">'
+    +   '<span>' + ctx.weekLabel + '</span>'
+    +   '<span style="opacity:0.85;">' + deptLabel + '</span>'
+    + '</div>'
+
+    // Name
+    + '<div style="padding:6px 12px; border-bottom:1px solid #eee;">'
+    +   '<div style="font-size:18px; font-weight:800; color:#1F3864; letter-spacing:0.5px;">' + name.toUpperCase() + '</div>'
+    + '</div>'
+
+    // Two-column body — Punctuality on the left, Output on the right
+    + '<div style="flex:1; display:flex; padding:8px 12px; gap:16px;">'
+
+    +   '<div style="flex:1.2; min-width:0;">'
+    +     '<div style="font-size:9px; font-weight:800; letter-spacing:1px; color:#888; margin-bottom:4px;">PUNCTUALITY</div>'
+    +     puncRowsHtml
+    +   '</div>'
+
+    +   '<div style="flex:1; min-width:0; border-left:1px solid #eee; padding-left:16px;">'
+    +     '<div style="font-size:9px; font-weight:800; letter-spacing:1px; color:#888; margin-bottom:4px;">OUTPUT</div>'
+    +     outputHtml
+    +   '</div>'
+
+    + '</div>'
+
+    + '</div>';   // end slip
+}
+
+// Format a yyyy-mm-dd date as "Mon Apr 13" etc — used in the slip punctuality rows.
+function formatShortDate(dateStr) {
+  if (!dateStr) return '';
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  const days   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return days[dt.getDay()] + ' ' + months[dt.getMonth()] + ' ' + dt.getDate();
+}
+
+// Format a tracker status into a short printable label
+function formatTrackerStatusShort(status, diffIn, diffOut) {
+  if (status === 'on_time')      return '🟢 On time';
+  if (status === 'no_hb')        return '⚠️ No HB';
+  if (status === 'late_yellow')  return '🟡 Late ' + (diffIn || 0) + 'm';
+  if (status === 'late_red')     return '🔴 Late ' + (diffIn || 0) + 'm';
+  if (status === 'early_yellow') return '🟡 Left ' + Math.abs(diffOut || 0) + 'm early';
+  if (status === 'early_red')    return '🔴 Left ' + Math.abs(diffOut || 0) + 'm early';
+  if (status === 'both_yellow')  return '🟡 Late + Early';
+  if (status === 'both_red')     return '🔴 Late + Early';
+  return status || '—';
 }
 
 // ══════════════════════════════════════════════════════════════
