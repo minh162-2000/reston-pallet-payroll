@@ -452,6 +452,33 @@
                 <span id="tracker-btn-text">Process Tracker File</span>
               </button>
             </div>
+
+            <div class="card mt-16">
+              <div class="card-title">Step 4 — Camera Files <span style="font-weight:400; text-transform:none; letter-spacing:0; color:var(--gray-400); font-size:11px;">(optional, runs independently)</span></div>
+              <p class="text-muted" style="margin: 8px 0 12px">Upload your weekly camera exports (trim + vulture). You can drop multiple files at once.</p>
+
+              <!-- Drop zone for camera xlsx files -->
+              <div id="camera-drop-zone" onclick="document.getElementById('camera-file').click()" style="
+                border: 2px dashed var(--gray-200); border-radius: 10px;
+                padding: 24px; text-align: center; cursor: pointer;
+                background: var(--gray-50); transition: all 0.2s; margin-bottom: 12px;">
+                <div style="font-size: 28px; margin-bottom: 6px;">📷</div>
+                <div style="font-size: 13px; font-weight: 600; color: var(--navy);" id="camera-drop-label">Drop camera .xlsx files here</div>
+                <div style="font-size: 11px; color: var(--gray-400); margin-top: 3px;">or click to browse — multi-select supported</div>
+                <input type="file" id="camera-file" accept=".xlsx,.xls" multiple style="display:none" onchange="handleCameraFileSelect(event)" />
+              </div>
+
+              <!-- List of loaded files -->
+              <div id="camera-file-list" style="display:none; margin-bottom:12px;"></div>
+
+              <div id="camera-info"    class="alert alert-navy"  style="display:none; margin-top:8px"></div>
+              <div id="camera-error"   class="alert alert-red"   style="display:none; margin-top:8px"></div>
+              <div id="camera-success" class="alert alert-green" style="display:none; margin-top:8px"></div>
+
+              <button class="btn btn-primary" id="camera-btn" onclick="processCamera()" disabled style="margin-top:12px;">
+                <span id="camera-btn-text">Process Camera Files</span>
+              </button>
+            </div>
           </div>
           <div>
             <div class="card">
@@ -1492,6 +1519,316 @@ function calcTrackerStatus(worstIn, worstOut) {
 
   return 'on_time';
 }
+
+// ══════════════════════════════════════════════════════════════
+// CAMERA UPLOAD — Phase 2 Step 3
+// ══════════════════════════════════════════════════════════════
+// Stores the list of camera files the user has dropped (may be 1, 2, or more)
+let cameraFiles = [];
+
+function handleCameraFileSelect(event) {
+  // event.target.files is a FileList — convert to Array so we can .forEach
+  const files = Array.from(event.target.files);
+  files.forEach(f => addCameraFile(f));
+  event.target.value = '';  // clear so the same file can be re-added if needed
+}
+
+function addCameraFile(file) {
+  if (!/\.xls[x]?$/i.test(file.name)) {
+    alert('Only Excel files (.xlsx / .xls) allowed: ' + file.name);
+    return;
+  }
+  // Avoid duplicate adds (by name + size)
+  const exists = cameraFiles.some(f => f.name === file.name && f.size === file.size);
+  if (exists) return;
+
+  cameraFiles.push(file);
+  renderCameraFileList();
+}
+
+function removeCameraFile(idx) {
+  cameraFiles.splice(idx, 1);
+  renderCameraFileList();
+}
+
+function renderCameraFileList() {
+  const list = document.getElementById('camera-file-list');
+  const btn  = document.getElementById('camera-btn');
+
+  if (cameraFiles.length === 0) {
+    list.style.display = 'none';
+    list.innerHTML = '';
+    btn.disabled = true;
+    // Reset drop zone styling
+    const zone = document.getElementById('camera-drop-zone');
+    if (zone) {
+      zone.style.borderColor = 'var(--gray-200)';
+      zone.style.background  = 'var(--gray-50)';
+    }
+    document.getElementById('camera-drop-label').textContent = 'Drop camera .xlsx files here';
+    return;
+  }
+
+  list.style.display = 'block';
+  list.innerHTML = cameraFiles.map((f, i) =>
+    '<div style="display:flex; align-items:center; justify-content:space-between; padding:6px 10px; background:var(--green-light); border-radius:6px; margin-bottom:4px; font-size:12px;">'
+    + '<span>✅ ' + f.name + ' <span style="color:var(--gray-400);">(' + Math.round(f.size/1024) + ' KB)</span></span>'
+    + '<span onclick="removeCameraFile(' + i + ')" style="cursor:pointer; color:var(--red); font-weight:900; padding:0 6px;" title="Remove">×</span>'
+    + '</div>'
+  ).join('');
+  btn.disabled = false;
+
+  // Update drop zone look
+  const zone = document.getElementById('camera-drop-zone');
+  zone.style.borderColor = 'var(--green)';
+  zone.style.background  = 'var(--green-light)';
+  document.getElementById('camera-drop-label').textContent = '✅ ' + cameraFiles.length + ' file' + (cameraFiles.length === 1 ? '' : 's') + ' ready';
+}
+
+// Drag-and-drop registration for camera zone (runs after DOM loads)
+document.addEventListener('DOMContentLoaded', function() {
+  const zone = document.getElementById('camera-drop-zone');
+  if (!zone) return;
+
+  zone.addEventListener('dragover', function(e) {
+    e.preventDefault();
+    zone.style.borderColor = 'var(--navy)';
+    zone.style.background  = '#EBF3FF';
+  });
+
+  zone.addEventListener('dragleave', function() {
+    if (cameraFiles.length > 0) {
+      zone.style.borderColor = 'var(--green)';
+      zone.style.background  = 'var(--green-light)';
+    } else {
+      zone.style.borderColor = 'var(--gray-200)';
+      zone.style.background  = 'var(--gray-50)';
+    }
+  });
+
+  zone.addEventListener('drop', function(e) {
+    e.preventDefault();
+    const files = Array.from(e.dataTransfer.files);
+    files.forEach(f => addCameraFile(f));
+  });
+});
+
+// ── Parse a single camera xlsx file into an array of daily rows ──
+// Works for both trim-export (1 sheet) and vulture-export (4 sheets) formats.
+function parseCameraFile(workbook) {
+  const result = [];
+  // Each sheet = one station's data
+  for (const sheetName of workbook.SheetNames) {
+    const sheet = workbook.Sheets[sheetName];
+    const rows  = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: true });
+    if (!rows || rows.length < 5) continue;  // need at least title + range + blank + header + 1 data row
+
+    // Row 0 = station title, e.g. "Station 1 (Bandsaw)" or "Station 5 (Trim Track)"
+    const title = String(rows[0][0] || '').trim();
+    const m = title.match(/(Station\s*\d+)/i);
+    if (!m) continue;  // skip sheets that don't look like a station
+    const stationName = m[1].replace(/\s+/g, ' ');    // normalize spaces
+
+    // Grab the type from inside parentheses → normalize to our types
+    const m2 = title.match(/\(([^)]+)\)/);
+    const rawType = m2 ? m2[1].toLowerCase().trim() : '';
+    let stationType = 'other';
+    if (rawType === 'bandsaw')                 stationType = 'stripping';
+    else if (rawType === 'repair')             stationType = 'repair';
+    else if (rawType.indexOf('trim') !== -1)   stationType = 'trim';
+
+    // Data rows start at index 4; keep going until we hit "Totals / Avg" or end
+    for (let i = 4; i < rows.length; i++) {
+      const row = rows[i] || [];
+      const first = row[0];
+      if (first === null || first === undefined) continue;
+
+      // Skip the "Totals / Avg" summary row
+      if (typeof first === 'string' && first.trim().toLowerCase().startsWith('total')) continue;
+
+      // Parse the date (it may come back as a Date object or a string)
+      let workDate;
+      if (first instanceof Date) {
+        workDate = toDateKeyLocal(first);
+      } else {
+        const d = new Date(String(first));
+        if (isNaN(d)) continue;
+        workDate = toDateKeyLocal(d);
+      }
+
+      const totalUnits = Number(row[1]) || 0;
+      const pph        = row[2] !== null && row[2] !== undefined ? Number(row[2]) : null;
+      const firstPallet = row[3] !== null ? String(row[3]).trim() : null;  // e.g. "07:08"
+      const lastPallet  = row[4] !== null ? String(row[4]).trim() : null;
+      const uptime      = row[5] !== null && row[5] !== undefined ? Number(row[5]) : null;
+      const missort     = row.length > 6 && row[6] !== null && row[6] !== undefined ? Number(row[6]) : null;
+
+      result.push({
+        station_name:  stationName,
+        station_type:  stationType,
+        work_date:     workDate,
+        total_units:   totalUnits,
+        pallets_per_hr: pph,
+        first_pallet:  firstPallet,
+        last_pallet:   lastPallet,
+        uptime_pct:    uptime,
+        missort_count: missort
+      });
+    }
+  }
+  return result;
+}
+
+// Given a HH:MM time string and a yyyy-mm-dd date, build a full ISO timestamp (local time)
+function combineDateAndTime(dateStr, timeStr) {
+  if (!dateStr || !timeStr) return null;
+  const [y, mo, d] = dateStr.split('-').map(Number);
+  const [h, m]     = timeStr.split(':').map(Number);
+  if (isNaN(h) || isNaN(m)) return null;
+  const dt = new Date(y, mo - 1, d, h, m, 0, 0);
+  return dt.toISOString();
+}
+
+// Main entry point — called when user clicks "Process Camera Files"
+async function processCamera() {
+  const infoEl = document.getElementById('camera-info');
+  const errEl  = document.getElementById('camera-error');
+  const sucEl  = document.getElementById('camera-success');
+  const btn    = document.getElementById('camera-btn');
+  const btnTxt = document.getElementById('camera-btn-text');
+  infoEl.style.display = 'none';
+  errEl.style.display  = 'none';
+  sucEl.style.display  = 'none';
+
+  if (cameraFiles.length === 0) {
+    errEl.textContent = 'Please drop at least one camera file first.';
+    errEl.style.display = 'flex';
+    return;
+  }
+  if (typeof XLSX === 'undefined') {
+    errEl.textContent = 'Excel reader library did not load. Check your internet connection and reload.';
+    errEl.style.display = 'flex';
+    return;
+  }
+
+  btn.disabled = true;
+  btnTxt.innerHTML = '<div class="spinner"></div> Processing...';
+
+  try {
+    // 1) Load all stations from DB so we can look up station_id by name
+    const { data: stations, error: stErr } = await sb.from('stations').select('id, name, station_type');
+    if (stErr) throw new Error('Could not load stations: ' + stErr.message);
+    const stationByName = {};
+    (stations || []).forEach(s => { stationByName[s.name] = s; });
+
+    // 2) Parse every file, collect all daily rows
+    const allRows = [];
+    const unknownStations = new Set();
+
+    for (const file of cameraFiles) {
+      const buf = await file.arrayBuffer();
+      const wb  = XLSX.read(buf, { type: 'array', cellDates: true });
+      const rows = parseCameraFile(wb);
+      rows.forEach(r => {
+        // Match by station name — fail if not in DB
+        if (!stationByName[r.station_name]) {
+          unknownStations.add(r.station_name);
+          return;
+        }
+        r.station_id = stationByName[r.station_name].id;
+        allRows.push(r);
+      });
+    }
+
+    if (allRows.length === 0) {
+      errEl.innerHTML = 'No camera data could be parsed.'
+        + (unknownStations.size > 0
+            ? '<br>Unknown stations: ' + [...unknownStations].join(', ')
+              + '<br>Add them on the Stations page first.'
+            : '');
+      errEl.style.display = 'flex';
+      btn.disabled = false;
+      btnTxt.innerHTML = 'Process Camera Files';
+      return;
+    }
+
+    // 3) Auto-update station type from the sheet title (user confirmed this is always accurate)
+    const typeUpdates = {};
+    for (const r of allRows) {
+      const s = stationByName[r.station_name];
+      if (s && r.station_type && r.station_type !== 'other' && s.station_type !== r.station_type) {
+        typeUpdates[s.id] = r.station_type;
+      }
+    }
+    for (const [id, type] of Object.entries(typeUpdates)) {
+      await sb.from('stations').update({ station_type: type }).eq('id', id);
+    }
+
+    // 4) Log this upload
+    const dates = allRows.map(r => r.work_date).sort();
+    const period = dates[0] + ' to ' + dates[dates.length - 1];
+
+    const { data: uploadRow, error: upErr } = await sb.from('camera_uploads').insert({
+      period_label: period,
+      rows_parsed:  allRows.length,
+      filename:     cameraFiles.map(f => f.name).join(', ')
+    }).select('id').single();
+    if (upErr) throw new Error('Could not log upload: ' + upErr.message);
+
+    // 5) Upsert all rows into camera_daily (unique on station_id+work_date so re-upload replaces)
+    const insertRows = allRows.map(r => ({
+      station_id:     r.station_id,
+      work_date:      r.work_date,
+      total_units:    r.total_units,
+      pallets_per_hr: r.pallets_per_hr,
+      first_pallet:   combineDateAndTime(r.work_date, r.first_pallet),
+      last_pallet:    combineDateAndTime(r.work_date, r.last_pallet),
+      uptime_pct:     r.uptime_pct,
+      missort_count:  r.missort_count,
+      upload_id:      uploadRow ? uploadRow.id : null
+    }));
+
+    const { error: insErr } = await sb.from('camera_daily')
+      .upsert(insertRows, { onConflict: 'station_id,work_date' });
+    if (insErr) throw new Error('Could not save camera data: ' + insErr.message);
+
+    // 6) Build a friendly summary
+    const byStation = {};
+    allRows.forEach(r => {
+      if (!byStation[r.station_name]) byStation[r.station_name] = { days: 0, units: 0 };
+      byStation[r.station_name].days  += 1;
+      byStation[r.station_name].units += (r.total_units || 0);
+    });
+
+    let summary = '✅ Camera data saved for ' + period + '<br>';
+    Object.keys(byStation).sort().forEach(name => {
+      const b = byStation[name];
+      summary += '&nbsp;&nbsp;• ' + name + ': ' + b.days + ' days, ' + b.units.toLocaleString() + ' total units<br>';
+    });
+    if (unknownStations.size > 0) {
+      summary += '<br>⚠️ Ignored unknown stations (add them on Stations page first): ' + [...unknownStations].join(', ');
+    }
+
+    sucEl.innerHTML = summary;
+    sucEl.style.display = 'flex';
+
+    // Reset the UI — clear file list so re-uploads work cleanly
+    cameraFiles = [];
+    renderCameraFileList();
+
+  } catch (err) {
+    errEl.textContent = 'Error: ' + err.message;
+    errEl.style.display = 'flex';
+    console.error(err);
+  }
+
+  btn.disabled = false;
+  btnTxt.innerHTML = 'Process Camera Files';
+}
+
+// ══════════════════════════════════════════════════════════════
+// END CAMERA UPLOAD
+// ══════════════════════════════════════════════════════════════
 
 function detectWeek() {
   const csv = document.getElementById('csv-input').value.trim();
