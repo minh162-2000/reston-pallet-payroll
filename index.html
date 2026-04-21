@@ -3006,26 +3006,106 @@ async function populatePerfWorkerSelect() {
   sel.dataset.populated = 'true';
 }
 
-// STEP 1 stub — actual dashboard rendering coming in Step 2.
-// For now this just shows a "coming in next step" message under each department.
+// Renders the department tables for the selected week.
+// Fetches camera_daily + station_workers + workers, splits units per worker,
+// groups by station type (stripping / trim / repair), and writes rows to the tables.
 async function renderPerfDashboard() {
   const weekSel = document.getElementById('perf-week-select');
   if (!weekSel.value) return;
 
-  const placeholder = '<tr><td colspan="5" style="padding:20px; text-align:center; color:var(--gray-400)">Dashboard rendering wired up in Step 2 — data loader coming next.</td></tr>';
-  document.getElementById('dept-stripping-body').innerHTML = placeholder;
-  document.getElementById('dept-trim-body').innerHTML      = placeholder;
-  document.getElementById('dept-repair-body').innerHTML    = placeholder;
-
-  // Also show the prev-week label so user sees what we're comparing against
-  const vsLabel = document.getElementById('perf-vs-label');
   const selOpt = weekSel.options[weekSel.selectedIndex];
-  const prevOpt = weekSel.options[weekSel.selectedIndex + 1];   // next option in list = prior week (descending sort)
-  if (prevOpt && prevOpt.value) {
-    vsLabel.textContent = 'Compare to: ' + prevOpt.textContent;
-  } else {
-    vsLabel.textContent = '(no prior week in history)';
+  const weekStart = selOpt.dataset.weekStart;
+  const weekEnd   = selOpt.dataset.weekEnd;
+
+  // Show loading state
+  const loadingRow = '<tr><td colspan="5" style="padding:20px; text-align:center; color:var(--gray-400)">Loading…</td></tr>';
+  document.getElementById('dept-stripping-body').innerHTML = loadingRow;
+  document.getElementById('dept-trim-body').innerHTML      = loadingRow;
+  document.getElementById('dept-repair-body').innerHTML    = loadingRow;
+
+  // Update "Compare to:" label
+  const vsLabel = document.getElementById('perf-vs-label');
+  const prevOpt = weekSel.options[weekSel.selectedIndex + 1];
+  vsLabel.textContent = (prevOpt && prevOpt.value)
+    ? 'Compare to: ' + prevOpt.textContent
+    : '(no prior week in history)';
+
+  // ── Fetch everything we need in parallel ────────────────────
+  // 1. Camera rows for the week
+  // 2. All stations (so we know type + id → name lookup)
+  // 3. All station_worker links with worker details joined in
+  const [camResult, stResult, swResult] = await Promise.all([
+    sb.from('camera_daily')
+      .select('station_id, work_date, total_units')
+      .gte('work_date', weekStart)
+      .lte('work_date', weekEnd),
+    sb.from('stations').select('id, name, station_type, active'),
+    sb.from('station_workers').select('station_id, worker_id, workers(id, name, active)')
+  ]);
+
+  const camRows  = camResult.data || [];
+  const stations = stResult.data  || [];
+  const links    = swResult.data  || [];
+
+  // Build a per-station lookup: { station_id: { type, workers: [{id, name}, ...] } }
+  const stationInfo = {};
+  stations.forEach(s => { stationInfo[s.id] = { type: s.station_type, name: s.name, workers: [] }; });
+  links.forEach(l => {
+    if (!stationInfo[l.station_id]) return;
+    if (l.workers && l.workers.active !== false) {
+      stationInfo[l.station_id].workers.push({ id: l.worker_id, name: l.workers.name });
+    }
+  });
+
+  // ── Aggregate units per worker, grouped by station type ────
+  // workerTotals = { 'stripping' | 'trim' | 'repair': { 'Morgan': 1513, ... } }
+  const workerTotals = { stripping: {}, trim: {}, repair: {}, other: {} };
+
+  camRows.forEach(c => {
+    const info = stationInfo[c.station_id];
+    if (!info) return;
+    const dept = info.type || 'other';
+    const bucket = workerTotals[dept] || workerTotals.other;
+
+    const workerCount = info.workers.length;
+    if (workerCount === 0) return;  // orphan station with no workers — ignore
+
+    // Split units equally among assigned workers (rounds to nearest int)
+    const unitsEach = Math.round((c.total_units || 0) / workerCount);
+    info.workers.forEach(w => {
+      bucket[w.name] = (bucket[w.name] || 0) + unitsEach;
+    });
+  });
+
+  // ── Render each department table ──────────────────────────
+  renderDeptTable('dept-stripping-body', workerTotals.stripping);
+  renderDeptTable('dept-trim-body',      workerTotals.trim);
+  renderDeptTable('dept-repair-body',    workerTotals.repair);
+}
+
+// Helper: writes rows into a department tbody. Handles empty state.
+function renderDeptTable(tbodyId, totalsByWorker) {
+  const tbody = document.getElementById(tbodyId);
+  const names = Object.keys(totalsByWorker).sort();
+
+  if (names.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" style="padding:20px; text-align:center; color:var(--gray-400)">No camera data for this week</td></tr>';
+    return;
   }
+
+  tbody.innerHTML = '';
+  names.forEach(name => {
+    const units = totalsByWorker[name];
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><strong>${name}</strong></td>
+      <td style="text-align:right; font-weight:600; color:#1F3864;">${units.toLocaleString()} <span style="color:#888; font-size:11px; font-weight:400;">units</span></td>
+      <td style="text-align:right; color:var(--gray-400);">—</td>
+      <td style="text-align:right; color:var(--gray-400);">—</td>
+      <td style="color:var(--gray-400); font-size:12px;">—</td>
+    `;
+    tbody.appendChild(tr);
+  });
 }
 
 async function loadPerformance() {
