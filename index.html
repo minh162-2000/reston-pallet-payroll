@@ -729,6 +729,7 @@
                 <thead>
                   <tr>
                     <th>Name</th>
+                    <th>Department</th>
                     <th>Role</th>
                     <th>Rate</th>
                     <th>Break Rule</th>
@@ -739,7 +740,7 @@
                   </tr>
                 </thead>
                 <tbody id="staff-table">
-                  <tr><td colspan="8" style="padding:32px; text-align:center; color:var(--gray-400)">Loading...</td></tr>
+                  <tr><td colspan="9" style="padding:32px; text-align:center; color:var(--gray-400)">Loading...</td></tr>
                 </tbody>
               </table>
             </div>
@@ -756,6 +757,19 @@
                 <label>Full Name *</label>
                 <input type="text" id="staff-name" placeholder="e.g. John Smith" />
                 <div class="text-muted" style="margin-top:4px">Must match exactly how it appears in Homebase CSV</div>
+              </div>
+
+              <div class="form-group">
+                <label>Department</label>
+                <select id="staff-department">
+                  <option value="">— not set —</option>
+                  <option value="Office">Office</option>
+                  <option value="Cutting">Cutting</option>
+                  <option value="Building">Building</option>
+                  <option value="Forklift">Forklift</option>
+                  <option value="Stripping">Stripping</option>
+                  <option value="Support/other">Support / other</option>
+                </select>
               </div>
 
               <div class="form-group">
@@ -3970,7 +3984,7 @@ async function loadPerformance() {
 // ── STAFF ROSTER ──────────────────────────────────────────────
 async function loadStaff() {
   const tbody = document.getElementById('staff-table');
-  tbody.innerHTML = '<tr><td colspan="8" style="padding:32px; text-align:center; color:var(--gray-400)">Loading...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="9" style="padding:32px; text-align:center; color:var(--gray-400)">Loading...</td></tr>';
 
   // Fetch every worker from the Supabase workers table, A → Z by name
   const { data: staff, error } = await sb.from('workers')
@@ -3978,12 +3992,12 @@ async function loadStaff() {
     .order('name', { ascending: true });
 
   if (error) {
-    tbody.innerHTML = '<tr><td colspan="8" style="padding:32px; text-align:center; color:var(--red)">Error loading staff: ' + error.message + '</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" style="padding:32px; text-align:center; color:var(--red)">Error loading staff: ' + error.message + '</td></tr>';
     return;
   }
 
   if (!staff || staff.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="8" style="padding:32px; text-align:center; color:var(--gray-400)">No workers yet — click "+ Add Worker" to add one</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" style="padding:32px; text-align:center; color:var(--gray-400)">No workers yet — click "+ Add Worker" to add one</td></tr>';
     workersByName = {};
     return;
   }
@@ -4007,8 +4021,14 @@ async function loadStaff() {
     // Dim rows for retired workers so they're visually separated
     if (!w.active) tr.style.opacity = '0.5';
 
+    // Department cell — chip if set, muted dash if not
+    const deptCell = w.department
+      ? '<span class="chip" style="background:#E8ECF5; color:#1F3864; font-weight:600;">' + w.department + '</span>'
+      : '<span class="td-muted">— not set —</span>';
+
     tr.innerHTML = `
       <td><strong>${w.name}</strong></td>
+      <td>${deptCell}</td>
       <td>${w.role || '—'}</td>
       <td class="td-money">${fmtMoney(w.rate)}/hr</td>
       <td>${breakLabels[w.break_rule] || w.break_rule}</td>
@@ -4055,6 +4075,7 @@ function resetStaffForm() {
   document.getElementById('staff-rate').value       = '';
   document.getElementById('staff-break-rule').value = 'standard';
   document.getElementById('staff-tracker-id').value = '';
+  document.getElementById('staff-department').value = '';
   document.getElementById('staff-is-tracked').checked = true;
   document.getElementById('staff-no-7am').checked   = false;
   document.getElementById('staff-saturday').checked = false;
@@ -4081,6 +4102,7 @@ async function editStaff(id) {
 
   // Fill in every field with the worker's current values
   document.getElementById('staff-name').value       = worker.name;
+  document.getElementById('staff-department').value = worker.department || '';
   document.getElementById('staff-role').value       = worker.role || 'Misc';
   document.getElementById('staff-rate').value       = worker.rate;
   document.getElementById('staff-break-rule').value = worker.break_rule || 'standard';
@@ -4100,6 +4122,7 @@ async function editStaff(id) {
 // based on whether editingStaffId is set
 async function saveStaff() {
   const name       = document.getElementById('staff-name').value.trim();
+  const department = document.getElementById('staff-department').value || null;
   const role       = document.getElementById('staff-role').value.trim() || 'Misc';
   const rate       = parseFloat(document.getElementById('staff-rate').value);
   const breakRule  = document.getElementById('staff-break-rule').value;
@@ -4126,6 +4149,7 @@ async function saveStaff() {
 
   const payload = {
     name:          name,
+    department:    department,
     role:          role,
     rate:          rate,
     break_rule:    breakRule,
