@@ -1237,19 +1237,13 @@ async function loadDashboard() {
 
   const selOpt   = sel.options[sel.selectedIndex];
   const label    = selOpt.dataset.label;
-  const status   = selOpt.dataset.status || 'draft';
 
   // Keep the topbar pill in sync with the selected week
   document.getElementById('topbar-week').textContent = label;
   currentWeekId = weekId;
 
-  // Show a status badge next to the dropdown
-  const statusEl = document.getElementById('dash-week-status');
-  if (status === 'final') {
-    statusEl.innerHTML = '<span class="chip chip-green">Final</span>';
-  } else {
-    statusEl.innerHTML = '<span class="chip chip-amber">Draft</span>';
-  }
+  // Clear any old status chip content (we no longer show Draft/Final chips)
+  document.getElementById('dash-week-status').innerHTML = '';
 
   // Update the "this week" sub-labels under each stat card to show the selected week label
   // (so when the user changes week, they know the stats updated)
