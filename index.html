@@ -566,6 +566,12 @@
           <select id="workers-filter" onchange="loadWorkersTab()" style="width:auto; padding:7px 12px; min-width:180px;">
             <option value="">— All workers —</option>
           </select>
+          <label style="margin:0 0 0 8px; font-size:13px; font-weight:600; color:var(--gray-600);">Tracker:</label>
+          <select id="workers-tracker-filter" onchange="loadWorkersTab()" style="width:auto; padding:7px 12px; min-width:160px;">
+            <option value="all">All</option>
+            <option value="with">With tracker data</option>
+            <option value="without">Without tracker data</option>
+          </select>
           <!-- View toggle -->
           <div style="margin-left:auto; display:flex; gap:6px;">
             <button id="tab-detail"  class="btn btn-primary btn-sm" onclick="setWorkersView('detail')">📋 Shift Detail</button>
@@ -2746,6 +2752,26 @@ async function loadWorkersTab() {
   if (filterName) {
     filteredShifts    = (shifts    || []).filter(s => s.worker_name === filterName);
     filteredSummaries = (summaries || []).filter(s => s.worker_name === filterName);
+  }
+
+  // ── APPLY TRACKER FILTER — show shifts with/without tracker data ──
+  // 'all' (default) = no filtering
+  // 'with'    = only shifts where tracker data exists for that worker+date
+  // 'without' = only shifts where it doesn't (forgot beacon, untracked worker, etc.)
+  const trackerFilter = document.getElementById('workers-tracker-filter').value;
+  if (trackerFilter === 'with') {
+    filteredShifts = (filteredShifts || []).filter(s => !!trackerLookup[s.worker_name + '|' + s.shift_date]);
+    // Summary: keep workers who have at least one tracked shift this week
+    const trackedNames = new Set(Object.values(trackerLookup).map(t => t.worker_name));
+    filteredSummaries = (filteredSummaries || []).filter(s => trackedNames.has(s.worker_name));
+  } else if (trackerFilter === 'without') {
+    filteredShifts = (filteredShifts || []).filter(s => !trackerLookup[s.worker_name + '|' + s.shift_date]);
+    // Summary: keep workers who have at least one untracked shift
+    const trackedKeys = new Set(Object.keys(trackerLookup));
+    filteredSummaries = (filteredSummaries || []).filter(s => {
+      const workerShifts = (shifts || []).filter(sh => sh.worker_name === s.worker_name);
+      return workerShifts.some(sh => !trackedKeys.has(sh.worker_name + '|' + sh.shift_date));
+    });
   }
 
   // ── DETAIL VIEW: shift rows ──────────────────────────────
