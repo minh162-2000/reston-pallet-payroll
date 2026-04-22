@@ -438,14 +438,6 @@
             <div id="dash-dept-panel" style="padding:4px 0;">
               <div style="padding:20px; text-align:center; color:var(--gray-400); font-size:12px;">Loading…</div>
             </div>
-
-            <!-- Hours by Department panel -->
-            <div class="section-header" style="margin-top:24px;">
-              <h3>⏱️ Hours by Department</h3>
-            </div>
-            <div id="dash-dept-hours-panel" style="padding:4px 0;">
-              <div style="padding:20px; text-align:center; color:var(--gray-400); font-size:12px;">Loading…</div>
-            </div>
           </div>
         </div>
       </div>
@@ -1541,7 +1533,6 @@ async function loadDashboard() {
   // ── PAYROLL BY DEPARTMENT PANEL ──────────────────────────────
   // Fetch worker → department map, aggregate this week's total_pay by department
   await renderDeptBreakdown('dash-dept-panel',       weekId, summaries, sel, 'money');
-  await renderDeptBreakdown('dash-dept-hours-panel', weekId, summaries, sel, 'hours');
 }
 
 // Render a "by department" panel on the Dashboard.
