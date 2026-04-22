@@ -339,9 +339,6 @@
       <div class="nav-item" onclick="nav('workers')">
         <span class="icon">👷</span> Hourly
       </div>
-      <div class="nav-item" onclick="nav('history')">
-        <span class="icon">📁</span> Week History
-      </div>
     </div>
 
     <div class="nav-section">
@@ -389,11 +386,20 @@
 
       <!-- ── DASHBOARD ── -->
       <div id="page-dashboard" class="page active">
+        <!-- Week selector at the top (merged from Week History) -->
+        <div style="display:flex; align-items:center; gap:12px; margin-bottom:20px; flex-wrap:wrap;">
+          <label style="margin:0; font-size:13px; font-weight:600; color:var(--gray-600)">Week:</label>
+          <select id="dash-week-select" onchange="loadDashboard()" style="width:auto; padding:7px 12px; min-width:220px;">
+            <option value="">— Loading weeks —</option>
+          </select>
+          <span id="dash-week-status" style="font-size:12px; color:var(--gray-400);"></span>
+        </div>
+
         <div class="stat-grid" id="dash-stats">
-          <div class="stat-card"><div class="stat-label">Total Labor Cost</div><div class="stat-value" id="ds-total">—</div><div class="stat-sub">this week</div></div>
-          <div class="stat-card"><div class="stat-label">Hourly Pay</div><div class="stat-value" id="ds-hourly">—</div><div class="stat-sub">this week</div></div>
-          <div class="stat-card"><div class="stat-label">Piece Rate Pay</div><div class="stat-value" id="ds-piece">—</div><div class="stat-sub">this week</div></div>
-          <div class="stat-card"><div class="stat-label">Active Workers</div><div class="stat-value" id="ds-workers">—</div><div class="stat-sub">this week</div></div>
+          <div class="stat-card"><div class="stat-label">Total Labor Cost</div><div class="stat-value" id="ds-total">—</div><div class="stat-sub" id="ds-total-sub">this week</div></div>
+          <div class="stat-card"><div class="stat-label">Hourly Pay</div><div class="stat-value" id="ds-hourly">—</div><div class="stat-sub" id="ds-hourly-sub">this week</div></div>
+          <div class="stat-card"><div class="stat-label">Piece Rate Pay</div><div class="stat-value" id="ds-piece">—</div><div class="stat-sub" id="ds-piece-sub">this week</div></div>
+          <div class="stat-card"><div class="stat-label">Active Workers</div><div class="stat-value" id="ds-workers">—</div><div class="stat-sub" id="ds-workers-sub">this week</div></div>
           <div class="stat-card"><div class="stat-label">Flags</div><div class="stat-value" id="ds-flags" style="color:var(--red)">—</div><div class="stat-sub">need review</div></div>
         </div>
 
@@ -1195,48 +1201,98 @@ function nav(page) {
 }
 
 // ── DASHBOARD ────────────────────────────────────────────────
+// On first load, populates the week dropdown and selects the latest week.
+// On subsequent calls (triggered by the dropdown's onchange), uses whichever week is selected.
 async function loadDashboard() {
-  // Get latest week
-  const { data: weeks } = await sb.from('week_periods')
-    .select('*').order('week_start', { ascending: false }).limit(1);
+  const sel = document.getElementById('dash-week-select');
 
-  if (!weeks || weeks.length === 0) return;
-  const week = weeks[0];
-  currentWeekId = week.id;
-  document.getElementById('topbar-week').textContent = week.label;
+  // First-time setup: populate the week dropdown
+  if (sel.dataset.populated !== 'true') {
+    const { data: weeks, error } = await sb.from('week_periods')
+      .select('*').order('week_start', { ascending: false });
 
-  // Get worker summaries for this week
+    if (error || !weeks || weeks.length === 0) {
+      sel.innerHTML = '<option value="">— No weeks available —</option>';
+      document.getElementById('dash-week-status').textContent = 'Run payroll to create your first week.';
+      return;
+    }
+
+    sel.innerHTML = '';
+    weeks.forEach((w, i) => {
+      const opt = document.createElement('option');
+      opt.value = w.id;
+      opt.dataset.label  = w.label || '';
+      opt.dataset.status = w.status || '';
+      opt.textContent    = (w.label || (w.week_start + ' → ' + w.week_end))
+                         + (i === 0 ? '  (latest)' : '');
+      if (i === 0) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    sel.dataset.populated = 'true';
+  }
+
+  // Now render the currently-selected week
+  const weekId = sel.value;
+  if (!weekId) return;
+
+  const selOpt   = sel.options[sel.selectedIndex];
+  const label    = selOpt.dataset.label;
+  const status   = selOpt.dataset.status || 'draft';
+
+  // Keep the topbar pill in sync with the selected week
+  document.getElementById('topbar-week').textContent = label;
+  currentWeekId = weekId;
+
+  // Show a status badge next to the dropdown
+  const statusEl = document.getElementById('dash-week-status');
+  if (status === 'final') {
+    statusEl.innerHTML = '<span class="chip chip-green">Final</span>';
+  } else {
+    statusEl.innerHTML = '<span class="chip chip-amber">Draft</span>';
+  }
+
+  // Update the "this week" sub-labels under each stat card to show the selected week label
+  // (so when the user changes week, they know the stats updated)
+  const subLabel = label || 'selected week';
+  document.getElementById('ds-total-sub').textContent   = subLabel;
+  document.getElementById('ds-hourly-sub').textContent  = subLabel;
+  document.getElementById('ds-piece-sub').textContent   = subLabel;
+  document.getElementById('ds-workers-sub').textContent = subLabel;
+
+  // Fetch worker summaries for this week
   const { data: summaries } = await sb.from('worker_week_summary')
-    .select('*').eq('week_id', week.id).order('total_pay', { ascending: false });
-
-  if (!summaries) return;
+    .select('*').eq('week_id', weekId).order('total_pay', { ascending: false });
 
   let totalHourly = 0, totalPiece = 0, flagCount = 0;
   const tbody = document.getElementById('dash-workers-table');
   tbody.innerHTML = '';
 
-  summaries.forEach(s => {
-    totalHourly += s.hourly_pay || 0;
-    totalPiece  += s.piece_pay  || 0;
-    if (s.has_flag) flagCount++;
+  if (!summaries || summaries.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4" class="empty-state" style="padding:24px; text-align:center; color:var(--gray-400)">No payroll data for this week yet.</td></tr>';
+  } else {
+    summaries.forEach(s => {
+      totalHourly += s.hourly_pay || 0;
+      totalPiece  += s.piece_pay  || 0;
+      if (s.has_flag) flagCount++;
 
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td><strong>${s.worker_name}</strong></td>
-      <td class="td-hrs">${(s.net_hrs || 0).toFixed(2)}</td>
-      <td class="td-money">${fmtMoney(s.total_pay)}</td>
-      <td class="td-flag">${s.has_flag ? '🚩' : ''}</td>
-    `;
-    tbody.appendChild(tr);
-  });
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><strong>${s.worker_name}</strong></td>
+        <td class="td-hrs">${(s.net_hrs || 0).toFixed(2)}</td>
+        <td class="td-money">${fmtMoney(s.total_pay)}</td>
+        <td class="td-flag">${s.has_flag ? '🚩' : ''}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
 
   document.getElementById('ds-total').textContent   = fmtMoney(totalHourly + totalPiece);
   document.getElementById('ds-hourly').textContent  = fmtMoney(totalHourly);
   document.getElementById('ds-piece').textContent   = fmtMoney(totalPiece);
-  document.getElementById('ds-workers').textContent = summaries.length;
+  document.getElementById('ds-workers').textContent = (summaries || []).length;
   document.getElementById('ds-flags').textContent   = flagCount;
 
-  // Recent submissions
+  // Recent submissions — stays as-is (most recent 8 across all weeks, not filtered by week)
   const { data: subs } = await sb.from('piece_submissions')
     .select('*').order('submitted_at', { ascending: false }).limit(8);
 
@@ -1253,6 +1309,8 @@ async function loadDashboard() {
       `;
       stbody.appendChild(tr);
     });
+  } else {
+    stbody.innerHTML = '<tr><td colspan="4" style="padding:24px; text-align:center; color:var(--gray-400)">No submissions yet</td></tr>';
   }
 }
 
@@ -2213,6 +2271,9 @@ async function runPayroll() {
     sucEl.textContent = '✅ Payroll complete for ' + detectedWeekLabel +
       (flags.length > 0 ? ' — ' + flags.length + ' flag(s) need review.' : ' — No issues found.');
     sucEl.style.display = 'flex';
+    // Reset the Dashboard's week dropdown cache so the new week shows up next time
+    const dashSel = document.getElementById('dash-week-select');
+    if (dashSel) dashSel.dataset.populated = '';
     loadDashboard();
     loadWeekDropdowns();
 
