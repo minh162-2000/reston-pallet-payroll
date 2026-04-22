@@ -438,6 +438,14 @@
             <div id="dash-dept-panel" style="padding:4px 0;">
               <div style="padding:20px; text-align:center; color:var(--gray-400); font-size:12px;">Loading…</div>
             </div>
+
+            <!-- Hours by Department panel -->
+            <div class="section-header" style="margin-top:24px;">
+              <h3>⏱️ Hours by Department</h3>
+            </div>
+            <div id="dash-dept-hours-panel" style="padding:4px 0;">
+              <div style="padding:20px; text-align:center; color:var(--gray-400); font-size:12px;">Loading…</div>
+            </div>
           </div>
         </div>
       </div>
@@ -1532,58 +1540,66 @@ async function loadDashboard() {
 
   // ── PAYROLL BY DEPARTMENT PANEL ──────────────────────────────
   // Fetch worker → department map, aggregate this week's total_pay by department
-  await renderDeptPayroll(weekId, summaries, sel);
+  await renderDeptBreakdown('dash-dept-panel',       weekId, summaries, sel, 'money');
+  await renderDeptBreakdown('dash-dept-hours-panel', weekId, summaries, sel, 'hours');
 }
 
-// Render the "Payroll by Department" panel on the Dashboard.
-// Input:
-//   - weekId: currently selected week (for the prior-week comparison)
-//   - summaries: this week's worker_week_summary rows (already fetched in loadDashboard)
-//   - weekSel: the dropdown element (used to find the prior week)
-async function renderDeptPayroll(weekId, summaries, weekSel) {
-  const panel = document.getElementById('dash-dept-panel');
+// Render a "by department" panel on the Dashboard.
+// Works for either dollars or hours, depending on the `mode` parameter.
+// Inputs:
+//   - panelId:   target element ID
+//   - weekId:    currently selected week
+//   - summaries: this week's worker_week_summary rows
+//   - weekSel:   the dropdown (used to find the prior week for trends)
+//   - mode:      'money' (uses total_pay) or 'hours' (uses net_hrs)
+async function renderDeptBreakdown(panelId, weekId, summaries, weekSel, mode) {
+  const panel = document.getElementById(panelId);
   if (!panel) return;
 
-  // If no payroll data yet, bail early
   if (!summaries || summaries.length === 0) {
     panel.innerHTML = '<div style="padding:20px; text-align:center; color:var(--gray-400); font-size:12px;">No payroll data yet for this week.</div>';
     return;
   }
 
-  // Fetch the worker → department mapping
+  // Pull the metric + formatter based on mode
+  const metricField = mode === 'hours' ? 'net_hrs' : 'total_pay';
+  const fmtValue = mode === 'hours'
+    ? (v => v.toFixed(1) + ' hrs')
+    : fmtMoney;
+
+  // Fetch worker → department map once
   const { data: workers } = await sb.from('workers').select('name, department');
   const deptByName = {};
   (workers || []).forEach(w => { deptByName[w.name] = w.department || 'Unassigned'; });
 
-  // Aggregate total_pay by department for THIS week
+  // Aggregate THIS week's metric by department
   const thisByDept = {};
   let grandTotal = 0;
   summaries.forEach(s => {
     const dept = deptByName[s.worker_name] || 'Unassigned';
-    thisByDept[dept] = (thisByDept[dept] || 0) + (s.total_pay || 0);
-    grandTotal += (s.total_pay || 0);
+    const val  = s[metricField] || 0;
+    thisByDept[dept] = (thisByDept[dept] || 0) + val;
+    grandTotal += val;
   });
 
-  // Aggregate prior week's pay by department (for trend arrows)
+  // Aggregate LAST week's metric by department (for trend arrows)
   const prevOpt = weekSel.options[weekSel.selectedIndex + 1];
   const prevByDept = {};
   if (prevOpt && prevOpt.value) {
     const { data: prevSummaries } = await sb.from('worker_week_summary')
-      .select('worker_name, total_pay').eq('week_id', prevOpt.value);
+      .select('worker_name, ' + metricField).eq('week_id', prevOpt.value);
     (prevSummaries || []).forEach(s => {
       const dept = deptByName[s.worker_name] || 'Unassigned';
-      prevByDept[dept] = (prevByDept[dept] || 0) + (s.total_pay || 0);
+      prevByDept[dept] = (prevByDept[dept] || 0) + (s[metricField] || 0);
     });
   }
 
-  // Stable department order: custom list first, then anything else (like 'Unassigned')
+  // Stable department order
   const preferredOrder = ['Cutting','Stripping','Building','Forklift','Office','Support/other'];
   const deptNames = [...new Set([...preferredOrder, ...Object.keys(thisByDept)])].filter(d => thisByDept[d] != null);
-
-  // Sort by this-week pay (biggest first) for visual impact
   deptNames.sort((a, b) => (thisByDept[b] || 0) - (thisByDept[a] || 0));
 
-  // Colors per department — gives the bars visual identity
+  // Colors per dept
   const deptColors = {
     Cutting:         '#1F3864',
     Stripping:       '#2E7D32',
@@ -1594,7 +1610,6 @@ async function renderDeptPayroll(weekId, summaries, weekSel) {
     Unassigned:      '#888888'
   };
 
-  // Helper: trend chip for a dept
   function deptTrend(thisVal, lastVal) {
     if (!lastVal || lastVal === 0) {
       if (thisVal > 0) return '<span style="background:#D6E4F7; color:#1A5FA8; padding:1px 8px; border-radius:10px; font-size:10px; font-weight:600;">🆕 first</span>';
@@ -1606,27 +1621,21 @@ async function renderDeptPayroll(weekId, summaries, weekSel) {
     return                    '<span style="background:#F2F2F2; color:#595959; padding:1px 8px; border-radius:10px; font-size:10px; font-weight:600;">➡️ same</span>';
   }
 
-  // Render — each row is: colored bar (proportional width) + dept name + $ amount + % + trend chip
   let html = '<div style="padding:4px 0;">';
   deptNames.forEach(dept => {
-    const thisVal = thisByDept[dept] || 0;
-    const lastVal = prevByDept[dept] || 0;
-    const pct     = grandTotal > 0 ? Math.round((thisVal / grandTotal) * 100) : 0;
+    const thisVal  = thisByDept[dept] || 0;
+    const lastVal  = prevByDept[dept] || 0;
+    const pct      = grandTotal > 0 ? Math.round((thisVal / grandTotal) * 100) : 0;
     const barWidth = grandTotal > 0 ? (thisVal / grandTotal) * 100 : 0;
-    const color = deptColors[dept] || '#888';
+    const color    = deptColors[dept] || '#888';
 
     html += '<div style="display:flex; align-items:center; gap:10px; padding:6px 0; border-bottom:1px solid #f0f0f0;">'
-      // Colored bar (proportional)
       + '<div style="flex:1; background:#F5F6F8; border-radius:4px; height:14px; overflow:hidden; min-width:60px;">'
       +   '<div style="width:' + barWidth + '%; height:100%; background:' + color + '; border-radius:4px;"></div>'
       + '</div>'
-      // Dept name
       + '<div style="min-width:110px; font-size:12px; font-weight:600; color:#333;">' + dept + '</div>'
-      // Dollar amount
-      + '<div style="min-width:70px; text-align:right; font-size:12px; font-weight:700; color:#1F3864;">' + fmtMoney(thisVal) + '</div>'
-      // Percentage
+      + '<div style="min-width:70px; text-align:right; font-size:12px; font-weight:700; color:#1F3864;">' + fmtValue(thisVal) + '</div>'
       + '<div style="min-width:42px; text-align:right; font-size:11px; color:#888;">' + pct + '%</div>'
-      // Trend chip
       + '<div style="min-width:70px; text-align:right;">' + deptTrend(thisVal, lastVal) + '</div>'
     + '</div>';
   });
