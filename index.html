@@ -418,13 +418,16 @@
           </div>
           <div>
             <div class="section-header">
-              <h3>Recent Submissions</h3>
-              <button class="btn btn-outline btn-sm" onclick="nav('submissions')">View All</button>
+              <h3>🚨 Issues This Week</h3>
+              <button class="btn btn-outline btn-sm" onclick="nav('workers')">View Hourly</button>
+            </div>
+            <div class="text-muted" style="margin-bottom:8px; font-size:11px;">
+              Shifts where the worker was clocked in but beacon-absent for more than 90 min.
             </div>
             <div class="table-wrap">
               <table>
-                <thead><tr><th>Worker</th><th>Customer</th><th>Qty</th><th>Date</th></tr></thead>
-                <tbody id="dash-submissions-table"><tr><td colspan="4" style="padding:24px; text-align:center; color:var(--gray-400)">No submissions yet</td></tr></tbody>
+                <thead><tr><th>Worker</th><th>Date</th><th>HB Hrs</th><th>Tracker Hrs</th><th>Gap</th></tr></thead>
+                <tbody id="dash-issues-table"><tr><td colspan="5" style="padding:24px; text-align:center; color:var(--gray-400)">Loading…</td></tr></tbody>
               </table>
             </div>
           </div>
@@ -1221,8 +1224,10 @@ async function loadDashboard() {
     weeks.forEach((w, i) => {
       const opt = document.createElement('option');
       opt.value = w.id;
-      opt.dataset.label  = w.label || '';
-      opt.dataset.status = w.status || '';
+      opt.dataset.label     = w.label || '';
+      opt.dataset.status    = w.status || '';
+      opt.dataset.weekStart = w.week_start;
+      opt.dataset.weekEnd   = w.week_end;
       opt.textContent    = (w.label || (w.week_start + ' → ' + w.week_end))
                          + (i === 0 ? '  (latest)' : '');
       if (i === 0) opt.selected = true;
@@ -1286,25 +1291,135 @@ async function loadDashboard() {
   document.getElementById('ds-workers').textContent = (summaries || []).length;
   document.getElementById('ds-flags').textContent   = flagCount;
 
-  // Recent submissions — stays as-is (most recent 8 across all weeks, not filtered by week)
-  const { data: subs } = await sb.from('piece_submissions')
-    .select('*').order('submitted_at', { ascending: false }).limit(8);
+  // ── TRENDS: fetch prior week and compute % change for the money cards ──
+  // Find the prior week by looking at the dropdown (same pattern as Performance Dashboard)
+  const prevOpt = sel.options[sel.selectedIndex + 1];
+  if (prevOpt && prevOpt.value) {
+    const prevWeekId = prevOpt.value;
+    const { data: prevSummaries } = await sb.from('worker_week_summary')
+      .select('hourly_pay, piece_pay, total_pay').eq('week_id', prevWeekId);
 
-  const stbody = document.getElementById('dash-submissions-table');
-  stbody.innerHTML = '';
-  if (subs && subs.length > 0) {
-    subs.forEach(s => {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td>${s.worker_name}</td>
-        <td>${s.customer_name}</td>
-        <td>${s.qty}</td>
-        <td class="td-muted">${new Date(s.work_date).toLocaleDateString('en-US', {month:'short', day:'numeric'})}</td>
-      `;
-      stbody.appendChild(tr);
+    let prevTotalHourly = 0, prevTotalPiece = 0;
+    (prevSummaries || []).forEach(s => {
+      prevTotalHourly += s.hourly_pay || 0;
+      prevTotalPiece  += s.piece_pay  || 0;
     });
+
+    // Helper to format a trend line under a stat-sub element
+    function setTrend(elId, thisVal, lastVal) {
+      const el = document.getElementById(elId);
+      if (!el) return;
+      // Append trend to existing sub-label text (preserve the week label we set earlier)
+      const base = el.textContent.trim();
+      if (lastVal === 0 && thisVal === 0) return;  // nothing to compare
+      if (lastVal === 0 && thisVal > 0) {
+        el.innerHTML = base + ' &middot; <span style="color:#1A5FA8; font-weight:600;">🆕 First week</span>';
+        return;
+      }
+      if (lastVal > 0 && thisVal === 0) {
+        el.innerHTML = base + ' &middot; <span style="color:#9A6C00; font-weight:600;">⚠️ no data</span>';
+        return;
+      }
+      const pct = Math.round(((thisVal - lastVal) / lastVal) * 100);
+      if (pct > 0)      el.innerHTML = base + ' &middot; <span style="color:#1E5631; font-weight:700;">📈 +' + pct + '%</span>';
+      else if (pct < 0) el.innerHTML = base + ' &middot; <span style="color:#C0392B; font-weight:700;">📉 ' + pct + '%</span>';
+      else              el.innerHTML = base + ' &middot; <span style="color:#595959; font-weight:600;">➡️ same</span>';
+    }
+
+    setTrend('ds-total-sub',  totalHourly + totalPiece, prevTotalHourly + prevTotalPiece);
+    setTrend('ds-hourly-sub', totalHourly,              prevTotalHourly);
+    setTrend('ds-piece-sub',  totalPiece,               prevTotalPiece);
+  }
+
+  // ── ISSUES: shifts where (Homebase net hrs) - (Tracker hrs) > 90 min ──
+  // Fetch this week's hourly_shifts + tracker_shifts in parallel
+  const issuesBody = document.getElementById('dash-issues-table');
+  const [hrResult, trResult] = await Promise.all([
+    sb.from('hourly_shifts')
+      .select('worker_name, shift_date, net_hrs')
+      .eq('week_id', weekId),
+    sb.from('tracker_shifts')
+      .select('worker_name, shift_date, first_seen, last_seen')
+      .gte('shift_date', selOpt.dataset.weekStart || '1900-01-01')
+      .lte('shift_date', selOpt.dataset.weekEnd   || '2100-01-01')
+  ]);
+
+  // Need weekStart/weekEnd on the option — attach them if missing (we didn't before)
+  // (We'll just look up from the week record itself if dataset is empty)
+  const hrRows = hrResult.data || [];
+  let   trRows = trResult.data || [];
+
+  // If we didn't have week_start/end on the option, fetch them for tracker query
+  if (!selOpt.dataset.weekStart) {
+    const { data: w } = await sb.from('week_periods').select('week_start, week_end').eq('id', weekId).single();
+    if (w) {
+      selOpt.dataset.weekStart = w.week_start;
+      selOpt.dataset.weekEnd   = w.week_end;
+      const { data: tr2 } = await sb.from('tracker_shifts')
+        .select('worker_name, shift_date, first_seen, last_seen')
+        .gte('shift_date', w.week_start).lte('shift_date', w.week_end);
+      trRows = tr2 || [];
+    }
+  }
+
+  // Build a lookup: (worker_name, shift_date) -> tracker row
+  const trByKey = {};
+  trRows.forEach(t => {
+    if (!t.first_seen || !t.last_seen) return;
+    trByKey[t.worker_name + '|' + t.shift_date] = t;
+  });
+
+  // Parse an ISO timestamp (from Supabase) into minutes-since-midnight (local time)
+  function isoToMinutes(iso) {
+    if (!iso) return null;
+    // Supabase returns timestamps like '2026-04-15T11:47:00+00:00' — we want HH:MM in local time
+    const d = new Date(iso);
+    if (isNaN(d)) return null;
+    return d.getHours() * 60 + d.getMinutes();
+  }
+
+  // Walk each hourly shift, compute gap vs tracker, flag when > 90 min
+  const issues = [];
+  hrRows.forEach(hr => {
+    const tr = trByKey[hr.worker_name + '|' + hr.shift_date];
+    if (!tr) return;  // no tracker data → skip (per your decision)
+    const firstMin = isoToMinutes(tr.first_seen);
+    const lastMin  = isoToMinutes(tr.last_seen);
+    if (firstMin == null || lastMin == null) return;
+    const trackerHrs = (lastMin - firstMin) / 60;  // hours from first to last beacon
+    if (trackerHrs < 0) return;  // overnight shift or bad data — skip
+    const hbHrs  = hr.net_hrs || 0;
+    const gapHrs = hbHrs - trackerHrs;
+    const gapMin = Math.round(gapHrs * 60);
+    if (gapMin > 90) {
+      issues.push({
+        worker: hr.worker_name,
+        date: hr.shift_date,
+        hbHrs,
+        trackerHrs,
+        gapMin
+      });
+    }
+  });
+
+  // Sort biggest gap first (most concerning at the top)
+  issues.sort((a, b) => b.gapMin - a.gapMin);
+
+  // Render the table
+  issuesBody.innerHTML = '';
+  if (issues.length === 0) {
+    issuesBody.innerHTML = '<tr><td colspan="5" style="padding:24px; text-align:center; color:#1E5631;">✅ No issues this week</td></tr>';
   } else {
-    stbody.innerHTML = '<tr><td colspan="4" style="padding:24px; text-align:center; color:var(--gray-400)">No submissions yet</td></tr>';
+    issues.forEach(i => {
+      const dateLabel = formatShortDate(i.date);
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td><strong>' + i.worker + '</strong></td>'
+                   + '<td class="td-muted">' + dateLabel + '</td>'
+                   + '<td class="td-hrs">' + i.hbHrs.toFixed(2) + '</td>'
+                   + '<td class="td-hrs">' + i.trackerHrs.toFixed(2) + '</td>'
+                   + '<td><span style="background:#FCE4D6; color:#C0392B; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:700;">' + i.gapMin + ' min</span></td>';
+      issuesBody.appendChild(tr);
+    });
   }
 }
 
