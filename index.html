@@ -729,17 +729,8 @@
         <div class="grid-2" style="align-items:start">
           <!-- LEFT: staff roster table -->
           <div>
-            <div class="section-header" style="display:flex; align-items:center; gap:12px;">
-              <h3 style="margin:0;">Staff Roster</h3>
-              <div style="margin-left:auto; display:flex; align-items:center; gap:6px;">
-                <label style="margin:0; font-size:12px; font-weight:600; color:var(--gray-600);">Sort by:</label>
-                <select id="staff-sort" onchange="loadStaff()" style="width:auto; padding:5px 10px; font-size:12px;">
-                  <option value="name">Name</option>
-                  <option value="department">Department</option>
-                  <option value="role">Role</option>
-                  <option value="status">Status</option>
-                </select>
-              </div>
+            <div class="section-header">
+              <h3>Staff Roster</h3>
             </div>
             <div class="table-wrap">
               <table>
@@ -4126,41 +4117,19 @@ async function loadStaff() {
   workersByName = {};
   staff.forEach(w => { workersByName[w.name] = w; });
 
-  // ── Apply the user's chosen sort (defaults to name) ──────
-  const sortEl = document.getElementById('staff-sort');
-  const sortBy = sortEl ? sortEl.value : 'name';
-
-  // Department preferred order (same as Dashboard) so Cutting appears before Office
+  // ── Sort by department (preferred order), then alphabetically within each dept ──
   const deptOrder = ['Cutting','Stripping','Building','Forklift','Office','Support/other'];
   function deptRank(dept) {
     if (!dept) return 999;  // unassigned dept goes last
     const i = deptOrder.indexOf(dept);
     return i === -1 ? 998 : i;
   }
-
-  if (sortBy === 'department') {
-    // Primary: department (preferred order), Secondary: name A-Z
-    staff.sort((a, b) => {
-      const da = deptRank(a.department);
-      const db = deptRank(b.department);
-      if (da !== db) return da - db;
-      return (a.name || '').localeCompare(b.name || '');
-    });
-  } else if (sortBy === 'role') {
-    // Primary: role A-Z, Secondary: name A-Z
-    staff.sort((a, b) => {
-      const ra = (a.role || '~').localeCompare(b.role || '~');
-      if (ra !== 0) return ra;
-      return (a.name || '').localeCompare(b.name || '');
-    });
-  } else if (sortBy === 'status') {
-    // Active first, then retired; within each group, A-Z by name
-    staff.sort((a, b) => {
-      if (!!a.active !== !!b.active) return a.active ? -1 : 1;
-      return (a.name || '').localeCompare(b.name || '');
-    });
-  }
-  // else: already sorted by name from the DB query
+  staff.sort((a, b) => {
+    const da = deptRank(a.department);
+    const db = deptRank(b.department);
+    if (da !== db) return da - db;
+    return (a.name || '').localeCompare(b.name || '');
+  });
 
   // Friendly labels for the break_rule codes stored in the database
   const breakLabels = {
