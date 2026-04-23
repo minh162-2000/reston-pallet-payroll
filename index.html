@@ -346,6 +346,9 @@
       <div class="nav-item" onclick="nav('submissions')">
         <span class="icon">📦</span> Submissions
       </div>
+      <div class="nav-item" onclick="nav('piece-rate')">
+        <span class="icon">💰</span> Piece Rate
+      </div>
       <div class="nav-item" onclick="nav('rates')">
         <span class="icon">⚙️</span> Master Rates
       </div>
@@ -657,73 +660,95 @@
         </div>
       </div>
 
-      <!-- ── SUBMISSIONS (combined Piece Rate + Build) ── -->
+      <!-- ── SUBMISSIONS (unified piece + build) ── -->
       <div id="page-submissions" class="page">
-        <!-- Tab toggle at top -->
-        <div style="display:flex; align-items:center; gap:6px; margin-bottom:16px;">
-          <button id="subs-tab-piece" class="btn btn-primary btn-sm" onclick="setSubmissionsView('piece')">📦 Piece Rate</button>
-          <button id="subs-tab-build" class="btn btn-outline btn-sm" onclick="setSubmissionsView('build')">🏗️ Build</button>
-        </div>
-
-        <!-- ═══ PIECE RATE VIEW (default) ═══ -->
-        <div id="subs-piece-view">
-          <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px; flex-wrap:wrap;">
-            <input type="text" id="sub-search" placeholder="Search worker or BOL..." style="width:220px;" oninput="filterSubmissions()" />
-            <select id="sub-filter-week" onchange="filterSubmissions()" style="width:180px;">
-              <option value="">All weeks</option>
-            </select>
-            <div style="margin-left:auto;">
-              <button class="btn btn-outline btn-sm" onclick="nav('submit')">+ Add Manual Entry</button>
-            </div>
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead><tr><th>Worker</th><th>Date</th><th>BOL</th><th>Customer</th><th>Size | Type</th><th>Qty</th><th>BOL Qty</th><th>Rate</th><th>Earnings</th><th>Flag</th></tr></thead>
-              <tbody id="submissions-table">
-                <tr><td colspan="10" style="padding:32px; text-align:center; color:var(--gray-400)">No submissions yet</td></tr>
-              </tbody>
-            </table>
+        <!-- Controls row: search + week filter + type filter + manual entry button -->
+        <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px; flex-wrap:wrap;">
+          <input type="text" id="sub-search" placeholder="Search worker, customer, BOL..." style="width:260px;" oninput="filterSubmissions()" />
+          <select id="sub-filter-week" onchange="filterSubmissions()" style="width:180px;">
+            <option value="">All weeks</option>
+          </select>
+          <select id="sub-filter-type" onchange="filterSubmissions()" style="width:140px;">
+            <option value="">All types</option>
+            <option value="Regular">Regular</option>
+            <option value="Solo">Build Solo</option>
+            <option value="Team">Build Team</option>
+          </select>
+          <span id="sub-stats" style="font-size:12px; color:var(--gray-600);"></span>
+          <div style="margin-left:auto;">
+            <button class="btn btn-outline btn-sm" onclick="nav('submit')">+ Add Manual Entry</button>
           </div>
         </div>
 
-        <!-- ═══ BUILD VIEW ═══ -->
-        <div id="subs-build-view" style="display:none;">
-          <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px; flex-wrap:wrap;">
-            <label style="margin:0; font-size:13px; font-weight:600; color:var(--gray-600)">Week:</label>
-            <select id="build-week-select" onchange="renderBuildPage()" style="width:auto; padding:7px 12px; min-width:200px;">
-              <option value="">— All weeks —</option>
-            </select>
-            <input type="text" id="build-search" placeholder="Search worker, customer, BOL..." oninput="renderBuildPage()" style="width:260px; padding:7px 10px;" />
-            <span id="build-stats" style="margin-left:auto; font-size:12px; color:var(--gray-600);"></span>
-          </div>
+        <!-- Issue banner if any submissions need review -->
+        <div id="sub-issues-banner" style="display:none; background:#FFF3CC; border-left:4px solid #FFC107; padding:10px 14px; border-radius:6px; margin-bottom:12px; font-size:13px; color:#6D5400;">
+          <strong>⚠️ <span id="sub-issues-count"></span> submission(s) need review</strong> — check the Flag column below.
+        </div>
 
-          <!-- Issue banner if any submissions need review -->
-          <div id="build-issues-banner" style="display:none; background:#FFF3CC; border-left:4px solid #FFC107; padding:10px 14px; border-radius:6px; margin-bottom:12px; font-size:13px; color:#6D5400;">
-            <strong>⚠️ <span id="build-issues-count"></span> submission(s) need review</strong> — check the Issue column below.
-          </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Timestamp</th>
+                <th>Your Name</th>
+                <th>BOL Number</th>
+                <th>Production Type</th>
+                <th class="td-hrs">Quantity Build</th>
+                <th>Team With</th>
+                <th>Customer Name</th>
+                <th>Size</th>
+                <th class="td-hrs">BOL Quantity</th>
+                <th>Build Date</th>
+                <th>Flag</th>
+              </tr>
+            </thead>
+            <tbody id="submissions-table">
+              <tr><td colspan="11" style="padding:32px; text-align:center; color:var(--gray-400)">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
 
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Worker</th>
-                  <th>Partner</th>
-                  <th>Type</th>
-                  <th>Customer</th>
-                  <th>Size</th>
-                  <th>BOL</th>
-                  <th class="td-hrs">Qty</th>
-                  <th class="td-money">Rate</th>
-                  <th class="td-money">Earnings</th>
-                  <th>Issue</th>
-                </tr>
-              </thead>
-              <tbody id="build-table">
-                <tr><td colspan="11" style="padding:32px; text-align:center; color:var(--gray-400)">Loading...</td></tr>
-              </tbody>
-            </table>
-          </div>
+      <!-- ── PIECE RATE ── -->
+      <div id="page-piece-rate" class="page">
+        <!-- Week selector -->
+        <div style="display:flex; align-items:center; gap:12px; margin-bottom:20px; flex-wrap:wrap;">
+          <label style="margin:0; font-size:13px; font-weight:600; color:var(--gray-600)">Week:</label>
+          <select id="pr-week-select" onchange="loadPieceRatePage()" style="width:auto; padding:7px 12px; min-width:220px;">
+            <option value="">— Loading weeks —</option>
+          </select>
+          <span id="pr-summary" style="margin-left:auto; font-size:12px; color:var(--gray-600);"></span>
+        </div>
+
+        <!-- Stat cards -->
+        <div class="stat-grid">
+          <div class="stat-card"><div class="stat-label">Piece Pay (Regular)</div><div class="stat-value" id="pr-stat-piece">—</div><div class="stat-sub" id="pr-stat-piece-sub">selected week</div></div>
+          <div class="stat-card"><div class="stat-label">Build Pay</div><div class="stat-value" id="pr-stat-build">—</div><div class="stat-sub" id="pr-stat-build-sub">selected week</div></div>
+          <div class="stat-card"><div class="stat-label">Total Piece+Build</div><div class="stat-value" id="pr-stat-total">—</div><div class="stat-sub" id="pr-stat-total-sub">selected week</div></div>
+          <div class="stat-card"><div class="stat-label">Active Workers</div><div class="stat-value" id="pr-stat-workers">—</div><div class="stat-sub">earning piece rate</div></div>
+        </div>
+
+        <!-- Per-worker breakdown table -->
+        <div class="section-header" style="margin-top:16px;">
+          <h3>Worker Breakdown</h3>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Worker</th>
+                <th>Department</th>
+                <th class="td-hrs">Regular Subs</th>
+                <th class="td-money">Regular $</th>
+                <th class="td-hrs">Build Subs</th>
+                <th class="td-money">Build $</th>
+                <th class="td-money">Total</th>
+              </tr>
+            </thead>
+            <tbody id="pr-workers-table">
+              <tr><td colspan="7" style="padding:32px; text-align:center; color:var(--gray-400)">Select a week above</td></tr>
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -1258,6 +1283,7 @@ function nav(page) {
     dashboard: 'Dashboard', 'run-payroll': 'Run Payroll',
     workers: 'Hourly', history: 'Week History',
     submissions: 'Submissions', rates: 'Master Rates',
+    'piece-rate': 'Piece Rate',
     performance: 'Performance', staff: 'Staff',
     stations: 'Stations',
     'print-slips': 'Print Slips'
@@ -1274,7 +1300,7 @@ function nav(page) {
   if (page === 'history')     loadHistory();
   if (page === 'workers')     loadWorkersTab();
   if (page === 'submissions') loadSubmissions();
-  if (page === 'build')       { nav('submissions'); setTimeout(() => setSubmissionsView('build'), 50); return; }
+  if (page === 'piece-rate')  loadPieceRatePage();
   if (page === 'performance') loadPerformancePage();
   if (page === 'print-slips') loadPrintSlipsPage();
   if (page === 'staff')       loadStaff();
@@ -3359,199 +3385,350 @@ function viewWeek(weekId) {
 
 // ── SUBMISSIONS ───────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════
-// BUILD PAGE — Phase 3
+// BUILD FORMAT — Phase 3
+// (Build submissions are now rendered alongside piece submissions
+//  in the unified loadSubmissions() / renderSubmissions() functions.)
 // ══════════════════════════════════════════════════════════════
 
-// Toggle between the Piece Rate and Build views on the Submissions page
-function setSubmissionsView(view) {
-  const pieceView = document.getElementById('subs-piece-view');
-  const buildView = document.getElementById('subs-build-view');
-  const btnPiece  = document.getElementById('subs-tab-piece');
-  const btnBuild  = document.getElementById('subs-tab-build');
-
-  if (view === 'build') {
-    pieceView.style.display = 'none';
-    buildView.style.display = 'block';
-    btnPiece.classList.remove('btn-primary'); btnPiece.classList.add('btn-outline');
-    btnBuild.classList.remove('btn-outline'); btnBuild.classList.add('btn-primary');
-    loadBuildPage();
-  } else {
-    pieceView.style.display = 'block';
-    buildView.style.display = 'none';
-    btnPiece.classList.remove('btn-outline'); btnPiece.classList.add('btn-primary');
-    btnBuild.classList.remove('btn-primary'); btnBuild.classList.add('btn-outline');
-    // Piece Rate data is loaded via loadSubmissions() which runs on nav to submissions page
-  }
-}
-
-// In-memory cache of all build rows so we can re-filter on the client without re-fetching
-var allBuildRows = [];
-
-// Entry point called when navigating to the Build page
-async function loadBuildPage() {
-  // Populate week dropdown once
-  const sel = document.getElementById('build-week-select');
-  if (sel.dataset.populated !== 'true') {
+async function loadSubmissions() {
+  // Populate the week filter dropdown (first time only)
+  const weekSel = document.getElementById('sub-filter-week');
+  if (weekSel.dataset.populated !== 'true') {
     const { data: weeks } = await sb.from('week_periods')
       .select('id, label, week_start, week_end')
       .order('week_start', { ascending: false });
-
-    sel.innerHTML = '<option value="">— All weeks —</option>';
-    (weeks || []).forEach((w, i) => {
+    weekSel.innerHTML = '<option value="">All weeks</option>';
+    (weeks || []).forEach(w => {
       const opt = document.createElement('option');
       opt.value = w.id;
       opt.dataset.weekStart = w.week_start;
       opt.dataset.weekEnd   = w.week_end;
       opt.textContent = w.label || (w.week_start + ' → ' + w.week_end);
-      if (i === 0) opt.selected = true;  // default to latest week
-      sel.appendChild(opt);
+      weekSel.appendChild(opt);
     });
-    sel.dataset.populated = 'true';
+    weekSel.dataset.populated = 'true';
   }
 
-  // Fetch all build submissions (we'll filter client-side)
-  const { data, error } = await sb.from('build_submissions')
-    .select('*')
-    .order('build_date', { ascending: false })
-    .order('submitted_at', { ascending: false });
+  // Fetch BOTH tables in parallel and normalize into a single unified shape.
+  // Unified row fields: date, worker, customer, size, bol, type, qty, rate, earnings, flag, flag_note, week_id, source
+  const [pieceResult, buildResult] = await Promise.all([
+    sb.from('piece_submissions').select('*').order('submitted_at', { ascending: false }),
+    sb.from('build_submissions').select('*').order('submitted_at', { ascending: false })
+  ]);
 
-  if (error) {
-    document.getElementById('build-table').innerHTML =
-      '<tr><td colspan="11" style="padding:32px; text-align:center; color:var(--red)">Error: ' + error.message + '</td></tr>';
-    return;
-  }
+  const pieceRows = pieceResult.data || [];
+  const buildRows = buildResult.data || [];
 
-  allBuildRows = data || [];
-  renderBuildPage();
-}
+  const unified = [];
 
-// Render the build table based on current filters (week + search)
-function renderBuildPage() {
-  const tbody = document.getElementById('build-table');
-  const weekSel = document.getElementById('build-week-select');
-  const search = (document.getElementById('build-search').value || '').trim().toLowerCase();
-
-  // Filter by week if one is selected
-  let rows = allBuildRows.slice();
-  if (weekSel.value) {
-    const opt = weekSel.options[weekSel.selectedIndex];
-    const wStart = opt.dataset.weekStart;
-    const wEnd   = opt.dataset.weekEnd;
-    rows = rows.filter(r => r.build_date >= wStart && r.build_date <= wEnd);
-  }
-
-  // Filter by search term across worker / customer / BOL / partner
-  if (search) {
-    rows = rows.filter(r => {
-      const haystack = [r.worker_name, r.customer_name, r.bol_number, r.team_with]
-        .filter(Boolean).join(' ').toLowerCase();
-      return haystack.indexOf(search) !== -1;
+  // Normalize piece submissions
+  pieceRows.forEach(p => {
+    unified.push({
+      id:            p.id,
+      source:        'piece',
+      timestamp:     p.submitted_at,
+      date:          p.work_date,
+      worker:        p.worker_name,
+      partner:       null,
+      customer:      p.customer_name,
+      size:          p.size,
+      bol:           p.bol_number,
+      bol_quantity:  p.bol_qty,
+      type:          'Regular',
+      qty:           p.qty,
+      rate:          p.rate,
+      earnings:      p.earnings,
+      flag:          !!p.issue,
+      flag_note:     p.issue ? 'Data issue' : null,
+      week_id:       p.week_id,
+      is_late:       p.is_late
     });
-  }
-
-  // Stats line + issue banner
-  let totalEarnings = 0;
-  let issueCount = 0;
-  rows.forEach(r => {
-    totalEarnings += (r.earnings || 0);
-    if (r.has_issue) issueCount++;
   });
-  document.getElementById('build-stats').textContent =
-    rows.length + ' build' + (rows.length === 1 ? '' : 's') + ' · ' + fmtMoney(totalEarnings) + ' total earnings';
 
-  const banner = document.getElementById('build-issues-banner');
-  if (issueCount > 0) {
-    document.getElementById('build-issues-count').textContent = issueCount;
-    banner.style.display = 'block';
-  } else {
-    banner.style.display = 'none';
-  }
-
-  // Empty state
-  if (rows.length === 0) {
-    tbody.innerHTML =
-      '<tr><td colspan="11" style="padding:32px; text-align:center; color:var(--gray-400)">'
-      + (allBuildRows.length === 0 ? 'No build submissions yet.' : 'No builds match the current filters.')
-      + '</td></tr>';
-    return;
-  }
-
-  // Render rows
-  tbody.innerHTML = '';
-  rows.forEach(r => {
-    const tr = document.createElement('tr');
-    if (r.has_issue) tr.style.background = '#FFF8E1';  // subtle yellow tint for issue rows
-
-    const dateLabel = r.build_date ? formatShortDate(r.build_date) : '—';
-    const rateCell = (r.rate != null) ? fmtMoney(r.rate) : '<span class="td-muted">—</span>';
-    const earnCell = (r.earnings != null && r.earnings > 0) ? fmtMoney(r.earnings) : '<span class="td-muted">—</span>';
-    const issueCell = r.has_issue
-      ? '<span style="background:#FCE4D6; color:#C0392B; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:700;" title="' + (r.issue_note || '').replace(/"/g, '&quot;') + '">⚠️ ' + (r.issue_note || 'Issue') + '</span>'
-      : '<span style="color:#1E5631;">✓</span>';
-
-    tr.innerHTML =
-        '<td class="td-muted">' + dateLabel + '</td>'
-      + '<td><strong>' + (r.worker_name || '—') + '</strong></td>'
-      + '<td class="td-muted">' + (r.team_with || '—') + '</td>'
-      + '<td>' + (r.production_type || '—') + '</td>'
-      + '<td>' + (r.customer_name || '—') + '</td>'
-      + '<td>' + (r.size || '—') + '</td>'
-      + '<td class="td-muted">' + (r.bol_number || '—') + '</td>'
-      + '<td class="td-hrs">' + (r.qty || 0) + '</td>'
-      + '<td class="td-money">' + rateCell + '</td>'
-      + '<td class="td-money"><strong>' + earnCell + '</strong></td>'
-      + '<td>' + issueCell + '</td>';
-    tbody.appendChild(tr);
+  // Normalize build submissions
+  buildRows.forEach(b => {
+    unified.push({
+      id:            b.id,
+      source:        'build',
+      timestamp:     b.submitted_at,
+      date:          b.build_date,
+      worker:        b.worker_name,
+      partner:       b.team_with || null,
+      customer:      b.customer_name,
+      size:          b.size,
+      bol:           b.bol_number,
+      bol_quantity:  b.bol_quantity,
+      type:          b.production_type || 'Solo',   // 'Solo' or 'Team'
+      qty:           b.qty,
+      rate:          b.rate,
+      earnings:      b.earnings,
+      flag:          !!b.has_issue,
+      flag_note:     b.issue_note,
+      week_id:       b.week_id,
+      is_late:       false
+    });
   });
-}
 
-// ══════════════════════════════════════════════════════════════
-// END BUILD PAGE
-// ══════════════════════════════════════════════════════════════
+  // Sort unified by date desc (newest first)
+  unified.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
 
-async function loadSubmissions() {
-  const { data } = await sb.from('piece_submissions')
-    .select('*').order('submitted_at', { ascending: false });
-  allSubmissions = data || [];
-  renderSubmissions(allSubmissions);
+  allSubmissions = unified;
+  filterSubmissions();
 }
 
 function filterSubmissions() {
-  const search  = document.getElementById('sub-search').value.toLowerCase();
-  const weekId  = document.getElementById('sub-filter-week').value;
-  let filtered  = allSubmissions;
-  if (search)  filtered = filtered.filter(s => s.worker_name.toLowerCase().includes(search) || s.bol_number.includes(search));
-  if (weekId)  filtered = filtered.filter(s => s.week_id === weekId);
+  const search = (document.getElementById('sub-search').value || '').toLowerCase().trim();
+  const weekId = document.getElementById('sub-filter-week').value;
+  const typeF  = document.getElementById('sub-filter-type').value;  // '' | 'Regular' | 'Solo' | 'Team'
+
+  let filtered = allSubmissions || [];
+
+  if (search) {
+    filtered = filtered.filter(s => {
+      const hay = [s.worker, s.customer, s.bol, s.partner].filter(Boolean).join(' ').toLowerCase();
+      return hay.indexOf(search) !== -1;
+    });
+  }
+
+  if (weekId) {
+    // Filter by week — we have week_id on piece rows, so check that.
+    // For build rows, match by date range (since builds aren't directly tagged to a week yet).
+    const opt = document.getElementById('sub-filter-week').options[
+      document.getElementById('sub-filter-week').selectedIndex
+    ];
+    const wStart = opt.dataset.weekStart;
+    const wEnd   = opt.dataset.weekEnd;
+    filtered = filtered.filter(s => {
+      if (s.source === 'piece') return s.week_id === weekId;
+      // build rows: match by build_date falling in the week
+      return s.date >= wStart && s.date <= wEnd;
+    });
+  }
+
+  if (typeF) {
+    filtered = filtered.filter(s => s.type === typeF);
+  }
+
   renderSubmissions(filtered);
 }
 
 function renderSubmissions(subs) {
   const tbody = document.getElementById('submissions-table');
-  tbody.innerHTML = '';
+  const banner = document.getElementById('sub-issues-banner');
+  const statsEl = document.getElementById('sub-stats');
+
   if (!subs || subs.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="10" style="padding:32px; text-align:center; color:var(--gray-400)">No submissions found</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="11" style="padding:32px; text-align:center; color:var(--gray-400)">No submissions found</td></tr>';
+    banner.style.display = 'none';
+    statsEl.textContent = '';
     return;
   }
+
+  // Stats line — just a count now (money lives on Piece Rate page)
+  let flagCount = 0;
+  subs.forEach(s => { if (s.flag) flagCount++; });
+  statsEl.textContent = subs.length + ' submission' + (subs.length === 1 ? '' : 's');
+
+  // Issue banner
+  if (flagCount > 0) {
+    document.getElementById('sub-issues-count').textContent = flagCount;
+    banner.style.display = 'block';
+  } else {
+    banner.style.display = 'none';
+  }
+
+  // Helper: format timestamp as MM/DD/YY HH:MM
+  function fmtTimestamp(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (isNaN(d)) return '—';
+    const m = ('0' + (d.getMonth() + 1)).slice(-2);
+    const day = ('0' + d.getDate()).slice(-2);
+    const yr  = String(d.getFullYear()).slice(-2);
+    const hr  = ('0' + d.getHours()).slice(-2);
+    const mn  = ('0' + d.getMinutes()).slice(-2);
+    return m + '/' + day + '/' + yr + ' ' + hr + ':' + mn;
+  }
+
+  // Render rows
+  tbody.innerHTML = '';
   subs.forEach(s => {
     const tr = document.createElement('tr');
-    if (s.issue) tr.style.background = 'var(--red-light)';
-    tr.innerHTML = `
-      <td><strong>${s.worker_name}</strong>${s.is_late ? ' <span class="chip chip-amber">🕐 Late</span>' : ''}</td>
-      <td class="td-muted">${fmtDate(s.work_date)}</td>
-      <td>${s.bol_number}</td>
-      <td>${s.customer_name}</td>
-      <td>${s.size} | <span class="chip ${s.prod_type === 'team' ? 'chip-purple' : 'chip-green'}">${s.prod_type}</span></td>
-      <td>${s.qty}</td>
-      <td class="td-muted">${s.bol_qty || '—'}</td>
-      <td class="td-muted">${s.rate ? '$' + Number(s.rate).toFixed(4) : '—'}</td>
-      <td class="td-money">${s.earnings ? fmtMoney(s.earnings) : '—'}</td>
-      <td class="td-flag">${s.issue ? '🚩' : ''}</td>
-    `;
+    if (s.flag) tr.style.background = '#FFF8E1';
+
+    // Type chip
+    let typeChip;
+    if (s.type === 'Regular')   typeChip = '<span class="chip chip-green">Regular</span>';
+    else if (s.type === 'Solo') typeChip = '<span class="chip" style="background:#E8ECF5; color:#1F3864; font-weight:600;">Solo</span>';
+    else if (s.type === 'Team') typeChip = '<span class="chip chip-purple">Team</span>';
+    else                        typeChip = '<span class="td-muted">' + (s.type || '—') + '</span>';
+
+    // Worker (Your Name) — may include a late indicator
+    const workerCell = '<strong>' + (s.worker || '—') + '</strong>' +
+                       (s.is_late ? ' <span class="chip chip-amber">🕐 Late</span>' : '');
+
+    // Flag chip with tooltip showing the issue note
+    const flagCell = s.flag
+      ? '<span style="background:#FCE4D6; color:#C0392B; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:700;" title="' + (s.flag_note || '').replace(/"/g, '&quot;') + '">🚩</span>'
+      : '';
+
+    tr.innerHTML =
+        '<td class="td-muted" style="font-size:11px;">' + fmtTimestamp(s.timestamp) + '</td>'
+      + '<td>' + workerCell + '</td>'
+      + '<td class="td-muted">' + (s.bol || '—') + '</td>'
+      + '<td>' + typeChip + '</td>'
+      + '<td class="td-hrs">' + (s.qty != null ? s.qty : '—') + '</td>'
+      + '<td class="td-muted">' + (s.partner || '—') + '</td>'
+      + '<td>' + (s.customer || '—') + '</td>'
+      + '<td>' + (s.size || '—') + '</td>'
+      + '<td class="td-hrs">' + (s.bol_quantity != null ? s.bol_quantity : '—') + '</td>'
+      + '<td class="td-muted">' + (s.date ? formatShortDate(s.date) : '—') + '</td>'
+      + '<td>' + flagCell + '</td>';
     tbody.appendChild(tr);
   });
 }
 
 // ── MASTER RATES ──────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
+// PIECE RATE PAGE — aggregates piece + build earnings per worker per week
+// ══════════════════════════════════════════════════════════════
+async function loadPieceRatePage() {
+  const sel = document.getElementById('pr-week-select');
+
+  // Populate the week dropdown (first time only)
+  if (sel.dataset.populated !== 'true') {
+    const { data: weeks } = await sb.from('week_periods')
+      .select('id, label, week_start, week_end')
+      .order('week_start', { ascending: false });
+
+    if (!weeks || weeks.length === 0) {
+      sel.innerHTML = '<option value="">— No weeks available —</option>';
+      document.getElementById('pr-workers-table').innerHTML =
+        '<tr><td colspan="7" style="padding:32px; text-align:center; color:var(--gray-400)">No weeks in the system yet. Run payroll first.</td></tr>';
+      return;
+    }
+
+    sel.innerHTML = '';
+    weeks.forEach((w, i) => {
+      const opt = document.createElement('option');
+      opt.value = w.id;
+      opt.dataset.weekStart = w.week_start;
+      opt.dataset.weekEnd   = w.week_end;
+      opt.dataset.label     = w.label || '';
+      opt.textContent       = (w.label || (w.week_start + ' → ' + w.week_end)) + (i === 0 ? '  (latest)' : '');
+      if (i === 0) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    sel.dataset.populated = 'true';
+  }
+
+  // Render for the currently-selected week
+  const weekId = sel.value;
+  if (!weekId) return;
+  const selOpt   = sel.options[sel.selectedIndex];
+  const weekStart = selOpt.dataset.weekStart;
+  const weekEnd   = selOpt.dataset.weekEnd;
+  const label     = selOpt.dataset.label;
+
+  // Set "selected week" subtitles under the stat cards
+  document.getElementById('pr-stat-piece-sub').textContent = label || 'selected week';
+  document.getElementById('pr-stat-build-sub').textContent = label || 'selected week';
+  document.getElementById('pr-stat-total-sub').textContent = label || 'selected week';
+
+  // Fetch piece + build submissions for the week in parallel
+  // Piece submissions are linked by week_id. Build submissions are linked by build_date
+  // (we don't assign week_id to build rows yet — they're matched by date range).
+  const [pieceResult, buildResult, workerResult] = await Promise.all([
+    sb.from('piece_submissions')
+      .select('worker_name, earnings')
+      .eq('week_id', weekId),
+    sb.from('build_submissions')
+      .select('worker_name, earnings')
+      .gte('build_date', weekStart).lte('build_date', weekEnd),
+    sb.from('workers').select('name, department')
+  ]);
+
+  const pieceRows  = pieceResult.data  || [];
+  const buildRows  = buildResult.data  || [];
+  const workers    = workerResult.data || [];
+
+  // Map worker → department for display
+  const deptByName = {};
+  workers.forEach(w => { deptByName[w.name] = w.department || ''; });
+
+  // Aggregate by worker
+  // perWorker[name] = { regularCount, regularEarnings, buildCount, buildEarnings }
+  const perWorker = {};
+  function ensure(name) {
+    if (!perWorker[name]) {
+      perWorker[name] = { regularCount: 0, regularEarnings: 0, buildCount: 0, buildEarnings: 0 };
+    }
+    return perWorker[name];
+  }
+
+  pieceRows.forEach(p => {
+    const w = ensure(p.worker_name);
+    w.regularCount    += 1;
+    w.regularEarnings += (p.earnings || 0);
+  });
+
+  buildRows.forEach(b => {
+    const w = ensure(b.worker_name);
+    w.buildCount    += 1;
+    w.buildEarnings += (b.earnings || 0);
+  });
+
+  // Compute grand totals for stat cards
+  let grandPiece = 0, grandBuild = 0;
+  Object.values(perWorker).forEach(w => {
+    grandPiece += w.regularEarnings;
+    grandBuild += w.buildEarnings;
+  });
+
+  document.getElementById('pr-stat-piece').textContent   = fmtMoney(grandPiece);
+  document.getElementById('pr-stat-build').textContent   = fmtMoney(grandBuild);
+  document.getElementById('pr-stat-total').textContent   = fmtMoney(grandPiece + grandBuild);
+  document.getElementById('pr-stat-workers').textContent = Object.keys(perWorker).length;
+
+  // Summary text at top right of controls row
+  document.getElementById('pr-summary').textContent =
+    (pieceRows.length + buildRows.length) + ' submissions · ' + fmtMoney(grandPiece + grandBuild) + ' total';
+
+  // Render the per-worker table
+  const tbody = document.getElementById('pr-workers-table');
+  const names = Object.keys(perWorker).sort((a, b) => {
+    const totalA = perWorker[a].regularEarnings + perWorker[a].buildEarnings;
+    const totalB = perWorker[b].regularEarnings + perWorker[b].buildEarnings;
+    return totalB - totalA;  // biggest earners first
+  });
+
+  if (names.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" style="padding:32px; text-align:center; color:var(--gray-400)">No piece-rate or build submissions for this week.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = '';
+  names.forEach(name => {
+    const w = perWorker[name];
+    const dept = deptByName[name] || '';
+    const deptCell = dept
+      ? '<span class="chip" style="background:#E8ECF5; color:#1F3864; font-weight:600;">' + dept + '</span>'
+      : '<span class="td-muted">—</span>';
+    const total = w.regularEarnings + w.buildEarnings;
+
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+        '<td><strong>' + name + '</strong></td>'
+      + '<td>' + deptCell + '</td>'
+      + '<td class="td-hrs">' + (w.regularCount || '—') + '</td>'
+      + '<td class="td-money">' + (w.regularEarnings > 0 ? fmtMoney(w.regularEarnings) : '<span class="td-muted">—</span>') + '</td>'
+      + '<td class="td-hrs">' + (w.buildCount || '—') + '</td>'
+      + '<td class="td-money">' + (w.buildEarnings > 0 ? fmtMoney(w.buildEarnings) : '<span class="td-muted">—</span>') + '</td>'
+      + '<td class="td-money"><strong>' + fmtMoney(total) + '</strong></td>';
+    tbody.appendChild(tr);
+  });
+}
+
 async function loadRates() {
   const { data } = await sb.from('master_rates').select('*').order('customer_name').order('size');
   const tbody = document.getElementById('rates-table');
