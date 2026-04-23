@@ -699,11 +699,10 @@
                 <th>Size</th>
                 <th class="td-hrs">BOL Quantity</th>
                 <th>Build Date</th>
-                <th>Flag</th>
               </tr>
             </thead>
             <tbody id="submissions-table">
-              <tr><td colspan="11" style="padding:32px; text-align:center; color:var(--gray-400)">Loading...</td></tr>
+              <tr><td colspan="10" style="padding:32px; text-align:center; color:var(--gray-400)">Loading...</td></tr>
             </tbody>
           </table>
         </div>
@@ -3518,7 +3517,7 @@ function renderSubmissions(subs) {
   const statsEl = document.getElementById('sub-stats');
 
   if (!subs || subs.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="11" style="padding:32px; text-align:center; color:var(--gray-400)">No submissions found</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" style="padding:32px; text-align:center; color:var(--gray-400)">No submissions found</td></tr>';
     banner.style.display = 'none';
     statsEl.textContent = '';
     return;
@@ -3529,7 +3528,7 @@ function renderSubmissions(subs) {
   subs.forEach(s => { if (s.flag) flagCount++; });
   statsEl.textContent = subs.length + ' submission' + (subs.length === 1 ? '' : 's');
 
-  // Issue banner
+  // Issue banner (Flag column was removed, but we still surface issues up top)
   if (flagCount > 0) {
     document.getElementById('sub-issues-count').textContent = flagCount;
     banner.style.display = 'block';
@@ -3554,7 +3553,12 @@ function renderSubmissions(subs) {
   tbody.innerHTML = '';
   subs.forEach(s => {
     const tr = document.createElement('tr');
-    if (s.flag) tr.style.background = '#FFF8E1';
+    // Keep the yellow background for flagged rows so they're still visually noticeable,
+    // with the issue note shown on row hover as a tooltip
+    if (s.flag) {
+      tr.style.background = '#FFF8E1';
+      if (s.flag_note) tr.title = '⚠️ ' + s.flag_note;
+    }
 
     // Type chip
     let typeChip;
@@ -3567,11 +3571,6 @@ function renderSubmissions(subs) {
     const workerCell = '<strong>' + (s.worker || '—') + '</strong>' +
                        (s.is_late ? ' <span class="chip chip-amber">🕐 Late</span>' : '');
 
-    // Flag chip with tooltip showing the issue note
-    const flagCell = s.flag
-      ? '<span style="background:#FCE4D6; color:#C0392B; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:700;" title="' + (s.flag_note || '').replace(/"/g, '&quot;') + '">🚩</span>'
-      : '';
-
     tr.innerHTML =
         '<td class="td-muted" style="font-size:11px;">' + fmtTimestamp(s.timestamp) + '</td>'
       + '<td>' + workerCell + '</td>'
@@ -3582,8 +3581,7 @@ function renderSubmissions(subs) {
       + '<td>' + (s.customer || '—') + '</td>'
       + '<td>' + (s.size || '—') + '</td>'
       + '<td class="td-hrs">' + (s.bol_quantity != null ? s.bol_quantity : '—') + '</td>'
-      + '<td class="td-muted">' + (s.date ? formatShortDate(s.date) : '—') + '</td>'
-      + '<td>' + flagCell + '</td>';
+      + '<td class="td-muted">' + (s.date ? formatShortDate(s.date) : '—') + '</td>';
     tbody.appendChild(tr);
   });
 }
