@@ -676,7 +676,7 @@
           </select>
           <span id="sub-stats" style="font-size:12px; color:var(--gray-600);"></span>
           <div style="margin-left:auto;">
-            <button class="btn btn-outline btn-sm" onclick="nav('submit')">+ Add Manual Entry</button>
+            <button class="btn btn-outline btn-sm" onclick="openBulkImportModal()">+ Bulk Import</button>
           </div>
         </div>
 
@@ -1164,6 +1164,42 @@
         </div>
       </div>
 
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     BULK IMPORT MODAL — paste CSV from Google Sheets Form_Responses
+     ══════════════════════════════════════════════════════════ -->
+<div id="bulk-import-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:1000; align-items:center; justify-content:center;">
+  <div style="background:#fff; width:min(900px, 95vw); max-height:90vh; overflow:auto; border-radius:10px; box-shadow:0 20px 60px rgba(0,0,0,0.3); padding:24px;">
+    <!-- Header -->
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+      <h2 style="margin:0; color:#1F3864; font-size:20px;">📥 Bulk Import Build Submissions</h2>
+      <button onclick="closeBulkImportModal()" style="background:none; border:none; font-size:24px; cursor:pointer; color:#888;">×</button>
+    </div>
+
+    <!-- Instructions -->
+    <div style="background:#EBF3FF; border-left:4px solid #1F3864; padding:10px 14px; border-radius:6px; margin-bottom:14px; font-size:13px; color:#1F3864;">
+      <strong>How to use:</strong> In Google Sheets open your Build Form's <code>Form_Responses</code> tab, select the rows you want (including header row), copy with <kbd>Ctrl+C</kbd>, then paste below.
+      <br><br>
+      <strong>Expected columns (in order):</strong> Timestamp, Your Name, BOL Number, Production Type, Quantity Build, Team with, Customer Name, Size, BOL Quantity, Build Date
+    </div>
+
+    <!-- Paste area -->
+    <label style="font-size:13px; font-weight:600; color:#555; margin:0;">Paste CSV or tab-separated data here:</label>
+    <textarea id="bulk-import-textarea" placeholder="Timestamp	Your Name	BOL Number	Production Type	Quantity Build	Team with	Customer Name	Size	BOL Quantity	Build Date&#10;4/14/2026 11:37:13	Manpreet	27151	Team	224	Darry	CHED Aspen	44x44	224	4/14/2026&#10;..." style="width:100%; min-height:180px; padding:12px; border:1px solid #ccc; border-radius:6px; font-family:monospace; font-size:12px; margin-top:6px;" oninput="previewBulkImport()"></textarea>
+
+    <!-- Preview -->
+    <div id="bulk-import-preview" style="margin-top:14px; font-size:13px;"></div>
+
+    <!-- Buttons -->
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-top:16px;">
+      <span id="bulk-import-status" style="font-size:13px; color:#555;"></span>
+      <div style="display:flex; gap:8px;">
+        <button class="btn btn-outline btn-sm" onclick="closeBulkImportModal()">Cancel</button>
+        <button id="bulk-import-btn" class="btn btn-primary btn-sm" onclick="runBulkImport()" disabled>Import 0 rows</button>
+      </div>
     </div>
   </div>
 </div>
@@ -3394,6 +3430,236 @@ function viewWeek(weekId) {
 // (Build submissions are now rendered alongside piece submissions
 //  in the unified loadSubmissions() / renderSubmissions() functions.)
 // ══════════════════════════════════════════════════════════════
+
+// ══════════════════════════════════════════════════════════════
+// BULK IMPORT MODAL — paste CSV/TSV data from Google Sheets → Supabase
+// ══════════════════════════════════════════════════════════════
+
+// Parsed rows cache used between preview and import
+var bulkImportRows = [];
+
+function openBulkImportModal() {
+  document.getElementById('bulk-import-modal').style.display = 'flex';
+  document.getElementById('bulk-import-textarea').value = '';
+  document.getElementById('bulk-import-preview').innerHTML = '';
+  document.getElementById('bulk-import-status').textContent = '';
+  document.getElementById('bulk-import-btn').disabled = true;
+  document.getElementById('bulk-import-btn').textContent = 'Import 0 rows';
+  bulkImportRows = [];
+}
+
+function closeBulkImportModal() {
+  document.getElementById('bulk-import-modal').style.display = 'none';
+}
+
+// Parse what the user pasted, normalize each row into the shape we'll insert into build_submissions
+function previewBulkImport() {
+  const text = document.getElementById('bulk-import-textarea').value.trim();
+  const preview = document.getElementById('bulk-import-preview');
+  const btn = document.getElementById('bulk-import-btn');
+  const statusEl = document.getElementById('bulk-import-status');
+
+  if (!text) {
+    preview.innerHTML = '';
+    btn.disabled = true;
+    btn.textContent = 'Import 0 rows';
+    statusEl.textContent = '';
+    bulkImportRows = [];
+    return;
+  }
+
+  // Split into lines, detect tab or comma separator by checking the first line
+  const lines = text.split('\n').filter(l => l.trim().length > 0);
+  if (lines.length === 0) return;
+
+  const sep = lines[0].includes('\t') ? '\t' : ',';
+  const parsed = lines.map(l => l.split(sep).map(c => c.trim()));
+
+  // Check if first row is a header (looks for "timestamp" or "your name")
+  let headerRow = parsed[0];
+  let dataRows  = parsed;
+  const lowerHeader = headerRow.join('|').toLowerCase();
+  const hasHeader = lowerHeader.indexOf('timestamp') !== -1 || lowerHeader.indexOf('your name') !== -1;
+  if (hasHeader) dataRows = parsed.slice(1);
+
+  // Expected column order (matches the Google Form's Form_Responses sheet)
+  // 0: Timestamp, 1: Your Name, 2: BOL Number, 3: Production Type,
+  // 4: Quantity Build, 5: Team with, 6: Customer Name, 7: Size,
+  // 8: BOL Quantity, 9: Build Date
+  const rows = [];
+  const warnings = [];
+
+  dataRows.forEach((row, i) => {
+    if (row.length < 10) {
+      warnings.push('Row ' + (i + 1) + ': only ' + row.length + ' columns (expected 10) — skipped');
+      return;
+    }
+    const submitted_at    = parseDateForImport(row[0]);
+    const worker_name     = row[1];
+    const bol_number      = row[2];
+    const production_type = normalizeType(row[3]);
+    const qty             = parseInt(row[4]) || 0;
+    const team_with       = row[5] || null;
+    const customer_name   = row[6];
+    const size            = row[7];
+    const bol_quantity    = parseInt(row[8]) || null;
+    const build_date      = parseDateOnly(row[9]);
+
+    if (!worker_name || !build_date || qty <= 0) {
+      warnings.push('Row ' + (i + 1) + ': missing worker name / build date / qty — skipped');
+      return;
+    }
+    if (!production_type) {
+      warnings.push('Row ' + (i + 1) + ': unknown production type "' + row[3] + '" — skipped');
+      return;
+    }
+
+    rows.push({
+      submitted_at:    submitted_at || new Date().toISOString(),
+      worker_name:     worker_name,
+      bol_number:      bol_number,
+      production_type: production_type,
+      qty:             qty,
+      team_with:       team_with,
+      customer_name:   customer_name,
+      size:            size,
+      bol_quantity:    bol_quantity,
+      build_date:      build_date
+    });
+  });
+
+  bulkImportRows = rows;
+
+  // Show preview
+  let html = '<div style="font-weight:600; margin-bottom:6px;">Preview — ' + rows.length + ' row(s) will be imported' + (warnings.length > 0 ? ', ' + warnings.length + ' skipped' : '') + '</div>';
+
+  if (rows.length > 0) {
+    html += '<div style="max-height:200px; overflow:auto; border:1px solid #ddd; border-radius:6px;">';
+    html += '<table style="width:100%; font-size:12px; border-collapse:collapse;">';
+    html += '<thead><tr style="background:#f5f5f5;"><th style="padding:6px; text-align:left;">Worker</th><th style="padding:6px; text-align:left;">Date</th><th style="padding:6px; text-align:left;">Type</th><th style="padding:6px; text-align:left;">Customer</th><th style="padding:6px; text-align:left;">Size</th><th style="padding:6px; text-align:right;">Qty</th></tr></thead><tbody>';
+    rows.slice(0, 10).forEach(r => {
+      html += '<tr style="border-top:1px solid #eee;">';
+      html += '<td style="padding:6px;">' + r.worker_name + (r.team_with ? ' <span style="color:#888;">+ ' + r.team_with + '</span>' : '') + '</td>';
+      html += '<td style="padding:6px;">' + r.build_date + '</td>';
+      html += '<td style="padding:6px;">' + r.production_type + '</td>';
+      html += '<td style="padding:6px;">' + (r.customer_name || '—') + '</td>';
+      html += '<td style="padding:6px;">' + (r.size || '—') + '</td>';
+      html += '<td style="padding:6px; text-align:right;">' + r.qty + '</td>';
+      html += '</tr>';
+    });
+    if (rows.length > 10) {
+      html += '<tr><td colspan="6" style="padding:6px; text-align:center; color:#888;">... and ' + (rows.length - 10) + ' more</td></tr>';
+    }
+    html += '</tbody></table></div>';
+  }
+
+  if (warnings.length > 0) {
+    html += '<div style="margin-top:10px; background:#FFF3CC; border-left:4px solid #FFC107; padding:8px 12px; border-radius:4px; font-size:12px; color:#6D5400; max-height:100px; overflow:auto;">';
+    warnings.forEach(w => { html += '<div>⚠️ ' + w + '</div>'; });
+    html += '</div>';
+  }
+
+  preview.innerHTML = html;
+  btn.disabled = rows.length === 0;
+  btn.textContent = 'Import ' + rows.length + ' row' + (rows.length === 1 ? '' : 's');
+  statusEl.textContent = '';
+}
+
+// Normalize the production type to match the DB CHECK constraint: 'Solo' or 'Team'
+function normalizeType(val) {
+  const s = (val || '').trim().toLowerCase();
+  if (s === 'solo') return 'Solo';
+  if (s === 'team') return 'Team';
+  return null;
+}
+
+// Parse a date-time string (e.g., "4/14/2026 11:37:13") to ISO timestamp
+function parseDateForImport(str) {
+  if (!str) return null;
+  const d = new Date(str);
+  if (isNaN(d)) return null;
+  return d.toISOString();
+}
+
+// Parse a date-only string (e.g., "4/14/2026") to 'yyyy-mm-dd'
+function parseDateOnly(str) {
+  if (!str) return null;
+  const parts = String(str).split('/');
+  if (parts.length === 3) {
+    const m = ('0' + parts[0]).slice(-2);
+    const d = ('0' + parts[1]).slice(-2);
+    const y = parts[2].length === 2 ? '20' + parts[2] : parts[2];
+    return y + '-' + m + '-' + d;
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+  const dt = new Date(str);
+  if (isNaN(dt)) return null;
+  return dt.getFullYear() + '-' + ('0' + (dt.getMonth() + 1)).slice(-2) + '-' + ('0' + dt.getDate()).slice(-2);
+}
+
+// Insert the parsed rows into Supabase. Build 2 rows per Team submission (submitter + partner)
+// to match how form-submitted builds are stored.
+async function runBulkImport() {
+  if (bulkImportRows.length === 0) return;
+
+  const btn = document.getElementById('bulk-import-btn');
+  const statusEl = document.getElementById('bulk-import-status');
+  btn.disabled = true;
+  btn.textContent = 'Importing...';
+  statusEl.textContent = '';
+
+  // Expand Team rows into 2 DB rows (submitter + teammate)
+  const expanded = [];
+  bulkImportRows.forEach(r => {
+    expanded.push({
+      submitted_at:    r.submitted_at,
+      worker_name:     r.worker_name,
+      bol_number:      r.bol_number,
+      production_type: r.production_type,
+      qty:             r.qty,
+      team_with:       r.team_with,
+      customer_name:   r.customer_name,
+      size:            r.size,
+      bol_quantity:    r.bol_quantity,
+      build_date:      r.build_date
+    });
+
+    if (r.production_type === 'Team' && r.team_with) {
+      expanded.push({
+        submitted_at:    r.submitted_at,
+        worker_name:     r.team_with,
+        bol_number:      r.bol_number,
+        production_type: 'Team',
+        qty:             r.qty,
+        team_with:       r.worker_name,  // flip
+        customer_name:   r.customer_name,
+        size:            r.size,
+        bol_quantity:    r.bol_quantity,
+        build_date:      r.build_date
+      });
+    }
+  });
+
+  const { error } = await sb.from('build_submissions').insert(expanded);
+
+  if (error) {
+    statusEl.textContent = '❌ Import failed: ' + error.message;
+    statusEl.style.color = '#C0392B';
+    btn.disabled = false;
+    btn.textContent = 'Retry Import';
+    return;
+  }
+
+  statusEl.textContent = '✅ Imported ' + expanded.length + ' row(s) successfully';
+  statusEl.style.color = '#1E5631';
+  btn.textContent = 'Done';
+
+  // Refresh the Submissions page to show the new data
+  setTimeout(() => {
+    closeBulkImportModal();
+    loadSubmissions();
+  }, 1200);
+}
 
 async function loadSubmissions() {
   // Populate the week filter dropdown (first time only)
