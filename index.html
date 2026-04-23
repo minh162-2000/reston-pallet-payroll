@@ -346,6 +346,9 @@
       <div class="nav-item" onclick="nav('submissions')">
         <span class="icon">📦</span> Submissions
       </div>
+      <div class="nav-item" onclick="nav('build')">
+        <span class="icon">🏗️</span> Build
+      </div>
       <div class="nav-item" onclick="nav('rates')">
         <span class="icon">⚙️</span> Master Rates
       </div>
@@ -673,6 +676,47 @@
             <thead><tr><th>Worker</th><th>Date</th><th>BOL</th><th>Customer</th><th>Size | Type</th><th>Qty</th><th>BOL Qty</th><th>Rate</th><th>Earnings</th><th>Flag</th></tr></thead>
             <tbody id="submissions-table">
               <tr><td colspan="10" style="padding:32px; text-align:center; color:var(--gray-400)">No submissions yet</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ── BUILD ── -->
+      <div id="page-build" class="page">
+        <!-- Controls row: week filter + search + stats -->
+        <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px; flex-wrap:wrap;">
+          <label style="margin:0; font-size:13px; font-weight:600; color:var(--gray-600)">Week:</label>
+          <select id="build-week-select" onchange="renderBuildPage()" style="width:auto; padding:7px 12px; min-width:200px;">
+            <option value="">— All weeks —</option>
+          </select>
+          <input type="text" id="build-search" placeholder="Search worker, customer, BOL..." oninput="renderBuildPage()" style="width:260px; padding:7px 10px;" />
+          <span id="build-stats" style="margin-left:auto; font-size:12px; color:var(--gray-600);"></span>
+        </div>
+
+        <!-- Issue banner if any submissions need review -->
+        <div id="build-issues-banner" style="display:none; background:#FFF3CC; border-left:4px solid #FFC107; padding:10px 14px; border-radius:6px; margin-bottom:12px; font-size:13px; color:#6D5400;">
+          <strong>⚠️ <span id="build-issues-count"></span> submission(s) need review</strong> — check the Issue column below.
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Worker</th>
+                <th>Partner</th>
+                <th>Type</th>
+                <th>Customer</th>
+                <th>Size</th>
+                <th>BOL</th>
+                <th class="td-hrs">Qty</th>
+                <th class="td-money">Rate</th>
+                <th class="td-money">Earnings</th>
+                <th>Issue</th>
+              </tr>
+            </thead>
+            <tbody id="build-table">
+              <tr><td colspan="11" style="padding:32px; text-align:center; color:var(--gray-400)">Loading...</td></tr>
             </tbody>
           </table>
         </div>
@@ -1209,6 +1253,7 @@ function nav(page) {
     dashboard: 'Dashboard', 'run-payroll': 'Run Payroll',
     workers: 'Hourly', history: 'Week History',
     submissions: 'Submissions', rates: 'Master Rates',
+    build: 'Build',
     performance: 'Performance', staff: 'Staff',
     stations: 'Stations',
     'print-slips': 'Print Slips'
@@ -1225,6 +1270,7 @@ function nav(page) {
   if (page === 'history')     loadHistory();
   if (page === 'workers')     loadWorkersTab();
   if (page === 'submissions') loadSubmissions();
+  if (page === 'build')       loadBuildPage();
   if (page === 'performance') loadPerformancePage();
   if (page === 'print-slips') loadPrintSlipsPage();
   if (page === 'staff')       loadStaff();
@@ -3308,6 +3354,135 @@ function viewWeek(weekId) {
 }
 
 // ── SUBMISSIONS ───────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
+// BUILD PAGE — Phase 3
+// ══════════════════════════════════════════════════════════════
+
+// In-memory cache of all build rows so we can re-filter on the client without re-fetching
+var allBuildRows = [];
+
+// Entry point called when navigating to the Build page
+async function loadBuildPage() {
+  // Populate week dropdown once
+  const sel = document.getElementById('build-week-select');
+  if (sel.dataset.populated !== 'true') {
+    const { data: weeks } = await sb.from('week_periods')
+      .select('id, label, week_start, week_end')
+      .order('week_start', { ascending: false });
+
+    sel.innerHTML = '<option value="">— All weeks —</option>';
+    (weeks || []).forEach((w, i) => {
+      const opt = document.createElement('option');
+      opt.value = w.id;
+      opt.dataset.weekStart = w.week_start;
+      opt.dataset.weekEnd   = w.week_end;
+      opt.textContent = w.label || (w.week_start + ' → ' + w.week_end);
+      if (i === 0) opt.selected = true;  // default to latest week
+      sel.appendChild(opt);
+    });
+    sel.dataset.populated = 'true';
+  }
+
+  // Fetch all build submissions (we'll filter client-side)
+  const { data, error } = await sb.from('build_submissions')
+    .select('*')
+    .order('build_date', { ascending: false })
+    .order('submitted_at', { ascending: false });
+
+  if (error) {
+    document.getElementById('build-table').innerHTML =
+      '<tr><td colspan="11" style="padding:32px; text-align:center; color:var(--red)">Error: ' + error.message + '</td></tr>';
+    return;
+  }
+
+  allBuildRows = data || [];
+  renderBuildPage();
+}
+
+// Render the build table based on current filters (week + search)
+function renderBuildPage() {
+  const tbody = document.getElementById('build-table');
+  const weekSel = document.getElementById('build-week-select');
+  const search = (document.getElementById('build-search').value || '').trim().toLowerCase();
+
+  // Filter by week if one is selected
+  let rows = allBuildRows.slice();
+  if (weekSel.value) {
+    const opt = weekSel.options[weekSel.selectedIndex];
+    const wStart = opt.dataset.weekStart;
+    const wEnd   = opt.dataset.weekEnd;
+    rows = rows.filter(r => r.build_date >= wStart && r.build_date <= wEnd);
+  }
+
+  // Filter by search term across worker / customer / BOL / partner
+  if (search) {
+    rows = rows.filter(r => {
+      const haystack = [r.worker_name, r.customer_name, r.bol_number, r.team_with]
+        .filter(Boolean).join(' ').toLowerCase();
+      return haystack.indexOf(search) !== -1;
+    });
+  }
+
+  // Stats line + issue banner
+  let totalEarnings = 0;
+  let issueCount = 0;
+  rows.forEach(r => {
+    totalEarnings += (r.earnings || 0);
+    if (r.has_issue) issueCount++;
+  });
+  document.getElementById('build-stats').textContent =
+    rows.length + ' build' + (rows.length === 1 ? '' : 's') + ' · ' + fmtMoney(totalEarnings) + ' total earnings';
+
+  const banner = document.getElementById('build-issues-banner');
+  if (issueCount > 0) {
+    document.getElementById('build-issues-count').textContent = issueCount;
+    banner.style.display = 'block';
+  } else {
+    banner.style.display = 'none';
+  }
+
+  // Empty state
+  if (rows.length === 0) {
+    tbody.innerHTML =
+      '<tr><td colspan="11" style="padding:32px; text-align:center; color:var(--gray-400)">'
+      + (allBuildRows.length === 0 ? 'No build submissions yet.' : 'No builds match the current filters.')
+      + '</td></tr>';
+    return;
+  }
+
+  // Render rows
+  tbody.innerHTML = '';
+  rows.forEach(r => {
+    const tr = document.createElement('tr');
+    if (r.has_issue) tr.style.background = '#FFF8E1';  // subtle yellow tint for issue rows
+
+    const dateLabel = r.build_date ? formatShortDate(r.build_date) : '—';
+    const rateCell = (r.rate != null) ? fmtMoney(r.rate) : '<span class="td-muted">—</span>';
+    const earnCell = (r.earnings != null && r.earnings > 0) ? fmtMoney(r.earnings) : '<span class="td-muted">—</span>';
+    const issueCell = r.has_issue
+      ? '<span style="background:#FCE4D6; color:#C0392B; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:700;" title="' + (r.issue_note || '').replace(/"/g, '&quot;') + '">⚠️ ' + (r.issue_note || 'Issue') + '</span>'
+      : '<span style="color:#1E5631;">✓</span>';
+
+    tr.innerHTML =
+        '<td class="td-muted">' + dateLabel + '</td>'
+      + '<td><strong>' + (r.worker_name || '—') + '</strong></td>'
+      + '<td class="td-muted">' + (r.team_with || '—') + '</td>'
+      + '<td>' + (r.production_type || '—') + '</td>'
+      + '<td>' + (r.customer_name || '—') + '</td>'
+      + '<td>' + (r.size || '—') + '</td>'
+      + '<td class="td-muted">' + (r.bol_number || '—') + '</td>'
+      + '<td class="td-hrs">' + (r.qty || 0) + '</td>'
+      + '<td class="td-money">' + rateCell + '</td>'
+      + '<td class="td-money"><strong>' + earnCell + '</strong></td>'
+      + '<td>' + issueCell + '</td>';
+    tbody.appendChild(tr);
+  });
+}
+
+// ══════════════════════════════════════════════════════════════
+// END BUILD PAGE
+// ══════════════════════════════════════════════════════════════
+
 async function loadSubmissions() {
   const { data } = await sb.from('piece_submissions')
     .select('*').order('submitted_at', { ascending: false });
