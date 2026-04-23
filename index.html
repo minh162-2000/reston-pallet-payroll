@@ -346,9 +346,6 @@
       <div class="nav-item" onclick="nav('submissions')">
         <span class="icon">📦</span> Submissions
       </div>
-      <div class="nav-item" onclick="nav('build')">
-        <span class="icon">🏗️</span> Build
-      </div>
       <div class="nav-item" onclick="nav('rates')">
         <span class="icon">⚙️</span> Master Rates
       </div>
@@ -660,65 +657,73 @@
         </div>
       </div>
 
-      <!-- ── SUBMISSIONS ── -->
+      <!-- ── SUBMISSIONS (combined Piece Rate + Build) ── -->
       <div id="page-submissions" class="page">
-        <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px; flex-wrap:wrap;">
-          <input type="text" id="sub-search" placeholder="Search worker or BOL..." style="width:220px;" oninput="filterSubmissions()" />
-          <select id="sub-filter-week" onchange="filterSubmissions()" style="width:180px;">
-            <option value="">All weeks</option>
-          </select>
-          <div style="margin-left:auto;">
-            <button class="btn btn-outline btn-sm" onclick="nav('submit')">+ Add Manual Entry</button>
+        <!-- Tab toggle at top -->
+        <div style="display:flex; align-items:center; gap:6px; margin-bottom:16px;">
+          <button id="subs-tab-piece" class="btn btn-primary btn-sm" onclick="setSubmissionsView('piece')">📦 Piece Rate</button>
+          <button id="subs-tab-build" class="btn btn-outline btn-sm" onclick="setSubmissionsView('build')">🏗️ Build</button>
+        </div>
+
+        <!-- ═══ PIECE RATE VIEW (default) ═══ -->
+        <div id="subs-piece-view">
+          <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px; flex-wrap:wrap;">
+            <input type="text" id="sub-search" placeholder="Search worker or BOL..." style="width:220px;" oninput="filterSubmissions()" />
+            <select id="sub-filter-week" onchange="filterSubmissions()" style="width:180px;">
+              <option value="">All weeks</option>
+            </select>
+            <div style="margin-left:auto;">
+              <button class="btn btn-outline btn-sm" onclick="nav('submit')">+ Add Manual Entry</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Worker</th><th>Date</th><th>BOL</th><th>Customer</th><th>Size | Type</th><th>Qty</th><th>BOL Qty</th><th>Rate</th><th>Earnings</th><th>Flag</th></tr></thead>
+              <tbody id="submissions-table">
+                <tr><td colspan="10" style="padding:32px; text-align:center; color:var(--gray-400)">No submissions yet</td></tr>
+              </tbody>
+            </table>
           </div>
         </div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Worker</th><th>Date</th><th>BOL</th><th>Customer</th><th>Size | Type</th><th>Qty</th><th>BOL Qty</th><th>Rate</th><th>Earnings</th><th>Flag</th></tr></thead>
-            <tbody id="submissions-table">
-              <tr><td colspan="10" style="padding:32px; text-align:center; color:var(--gray-400)">No submissions yet</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
 
-      <!-- ── BUILD ── -->
-      <div id="page-build" class="page">
-        <!-- Controls row: week filter + search + stats -->
-        <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px; flex-wrap:wrap;">
-          <label style="margin:0; font-size:13px; font-weight:600; color:var(--gray-600)">Week:</label>
-          <select id="build-week-select" onchange="renderBuildPage()" style="width:auto; padding:7px 12px; min-width:200px;">
-            <option value="">— All weeks —</option>
-          </select>
-          <input type="text" id="build-search" placeholder="Search worker, customer, BOL..." oninput="renderBuildPage()" style="width:260px; padding:7px 10px;" />
-          <span id="build-stats" style="margin-left:auto; font-size:12px; color:var(--gray-600);"></span>
-        </div>
+        <!-- ═══ BUILD VIEW ═══ -->
+        <div id="subs-build-view" style="display:none;">
+          <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px; flex-wrap:wrap;">
+            <label style="margin:0; font-size:13px; font-weight:600; color:var(--gray-600)">Week:</label>
+            <select id="build-week-select" onchange="renderBuildPage()" style="width:auto; padding:7px 12px; min-width:200px;">
+              <option value="">— All weeks —</option>
+            </select>
+            <input type="text" id="build-search" placeholder="Search worker, customer, BOL..." oninput="renderBuildPage()" style="width:260px; padding:7px 10px;" />
+            <span id="build-stats" style="margin-left:auto; font-size:12px; color:var(--gray-600);"></span>
+          </div>
 
-        <!-- Issue banner if any submissions need review -->
-        <div id="build-issues-banner" style="display:none; background:#FFF3CC; border-left:4px solid #FFC107; padding:10px 14px; border-radius:6px; margin-bottom:12px; font-size:13px; color:#6D5400;">
-          <strong>⚠️ <span id="build-issues-count"></span> submission(s) need review</strong> — check the Issue column below.
-        </div>
+          <!-- Issue banner if any submissions need review -->
+          <div id="build-issues-banner" style="display:none; background:#FFF3CC; border-left:4px solid #FFC107; padding:10px 14px; border-radius:6px; margin-bottom:12px; font-size:13px; color:#6D5400;">
+            <strong>⚠️ <span id="build-issues-count"></span> submission(s) need review</strong> — check the Issue column below.
+          </div>
 
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Worker</th>
-                <th>Partner</th>
-                <th>Type</th>
-                <th>Customer</th>
-                <th>Size</th>
-                <th>BOL</th>
-                <th class="td-hrs">Qty</th>
-                <th class="td-money">Rate</th>
-                <th class="td-money">Earnings</th>
-                <th>Issue</th>
-              </tr>
-            </thead>
-            <tbody id="build-table">
-              <tr><td colspan="11" style="padding:32px; text-align:center; color:var(--gray-400)">Loading...</td></tr>
-            </tbody>
-          </table>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Worker</th>
+                  <th>Partner</th>
+                  <th>Type</th>
+                  <th>Customer</th>
+                  <th>Size</th>
+                  <th>BOL</th>
+                  <th class="td-hrs">Qty</th>
+                  <th class="td-money">Rate</th>
+                  <th class="td-money">Earnings</th>
+                  <th>Issue</th>
+                </tr>
+              </thead>
+              <tbody id="build-table">
+                <tr><td colspan="11" style="padding:32px; text-align:center; color:var(--gray-400)">Loading...</td></tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
 
@@ -1253,7 +1258,6 @@ function nav(page) {
     dashboard: 'Dashboard', 'run-payroll': 'Run Payroll',
     workers: 'Hourly', history: 'Week History',
     submissions: 'Submissions', rates: 'Master Rates',
-    build: 'Build',
     performance: 'Performance', staff: 'Staff',
     stations: 'Stations',
     'print-slips': 'Print Slips'
@@ -1270,7 +1274,7 @@ function nav(page) {
   if (page === 'history')     loadHistory();
   if (page === 'workers')     loadWorkersTab();
   if (page === 'submissions') loadSubmissions();
-  if (page === 'build')       loadBuildPage();
+  if (page === 'build')       { nav('submissions'); setTimeout(() => setSubmissionsView('build'), 50); return; }
   if (page === 'performance') loadPerformancePage();
   if (page === 'print-slips') loadPrintSlipsPage();
   if (page === 'staff')       loadStaff();
@@ -3357,6 +3361,28 @@ function viewWeek(weekId) {
 // ══════════════════════════════════════════════════════════════
 // BUILD PAGE — Phase 3
 // ══════════════════════════════════════════════════════════════
+
+// Toggle between the Piece Rate and Build views on the Submissions page
+function setSubmissionsView(view) {
+  const pieceView = document.getElementById('subs-piece-view');
+  const buildView = document.getElementById('subs-build-view');
+  const btnPiece  = document.getElementById('subs-tab-piece');
+  const btnBuild  = document.getElementById('subs-tab-build');
+
+  if (view === 'build') {
+    pieceView.style.display = 'none';
+    buildView.style.display = 'block';
+    btnPiece.classList.remove('btn-primary'); btnPiece.classList.add('btn-outline');
+    btnBuild.classList.remove('btn-outline'); btnBuild.classList.add('btn-primary');
+    loadBuildPage();
+  } else {
+    pieceView.style.display = 'block';
+    buildView.style.display = 'none';
+    btnPiece.classList.remove('btn-outline'); btnPiece.classList.add('btn-primary');
+    btnBuild.classList.remove('btn-primary'); btnBuild.classList.add('btn-outline');
+    // Piece Rate data is loaded via loadSubmissions() which runs on nav to submissions page
+  }
+}
 
 // In-memory cache of all build rows so we can re-filter on the client without re-fetching
 var allBuildRows = [];
