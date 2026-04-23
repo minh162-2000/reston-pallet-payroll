@@ -3955,15 +3955,17 @@ async function loadBuildPayPage() {
       e.issue = 'Missing customer or size';
       return;
     }
-    // Build rates use "Build Solo" / "Build Team" in the Type column
-    const typeKey = e.prodType === 'team' ? clean('Build Team') : clean('Build Solo');
+    // Rate lookup: use plain 'solo'/'team' (matches the master_rates prod_type column).
+    // Your current workflow shares rates between cutters/strippers/builders,
+    // so 'solo' and 'team' are the effective Build rates.
+    const typeKey  = clean(e.prodType);  // 'solo' or 'team'
     const key      = clean(e.customer) + '|' + clean(e.size) + '|' + typeKey;
     const fallback = clean(e.customer) + '|' + clean(e.size);
     if (rateMap[key] != null)           e.rate = rateMap[key];
     else if (rateMap[fallback] != null) e.rate = rateMap[fallback];
     else {
       e.rate  = null;
-      e.issue = 'No rate: ' + e.customer + ' | ' + e.size + ' | Build ' + (e.prodType || '?');
+      e.issue = 'No rate: ' + e.customer + ' | ' + e.size + ' | ' + (e.prodType || '?');
     }
   });
 
