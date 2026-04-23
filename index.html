@@ -3908,7 +3908,7 @@ async function loadBuildPayPage() {
     sb.from('build_submissions')
       .select('worker_name, build_date, bol_number, production_type, qty, customer_name, size, bol_quantity, submitted_at, team_with')
       .gte('build_date', weekStart).lte('build_date', weekEnd),
-    sb.from('master_rates').select('customer_name, prod_type, size, rate, type')
+    sb.from('master_rates').select('customer_name, prod_type, size, rate')
   ]);
 
   const buildRows = buildResult.data || [];
