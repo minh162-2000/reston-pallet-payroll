@@ -346,8 +346,8 @@
       <div class="nav-item" onclick="nav('submissions')">
         <span class="icon">📦</span> Submissions
       </div>
-      <div class="nav-item" onclick="nav('piece-rate')">
-        <span class="icon">💰</span> Piece Rate
+      <div class="nav-item" onclick="nav('build-pay')">
+        <span class="icon">🏗️</span> Build Pay
       </div>
       <div class="nav-item" onclick="nav('rates')">
         <span class="icon">⚙️</span> Master Rates
@@ -401,7 +401,7 @@
         <div class="stat-grid" id="dash-stats">
           <div class="stat-card"><div class="stat-label">Total Labor Cost</div><div class="stat-value" id="ds-total">—</div><div class="stat-sub" id="ds-total-sub">this week</div></div>
           <div class="stat-card"><div class="stat-label">Hourly Pay</div><div class="stat-value" id="ds-hourly">—</div><div class="stat-sub" id="ds-hourly-sub">this week</div></div>
-          <div class="stat-card"><div class="stat-label">Piece Rate Pay</div><div class="stat-value" id="ds-piece">—</div><div class="stat-sub" id="ds-piece-sub">this week</div></div>
+          <div class="stat-card"><div class="stat-label">Build Pay</div><div class="stat-value" id="ds-piece">—</div><div class="stat-sub" id="ds-piece-sub">this week</div></div>
           <div class="stat-card"><div class="stat-label">Active Workers</div><div class="stat-value" id="ds-workers">—</div><div class="stat-sub" id="ds-workers-sub">this week</div></div>
           <div class="stat-card"><div class="stat-label">Flags</div><div class="stat-value" id="ds-flags" style="color:var(--red)">—</div><div class="stat-sub">need review</div></div>
         </div>
@@ -625,7 +625,7 @@
               <thead>
                 <tr>
                   <th>Worker</th><th>Role</th><th>Net Hrs</th>
-                  <th>Hourly Pay</th><th>Piece Rate Pay</th><th>Combined Total</th><th>Flag</th>
+                  <th>Hourly Pay</th><th>Build Pay</th><th>Combined Total</th><th>Flag</th>
                 </tr>
               </thead>
               <tbody id="workers-table">
@@ -708,33 +708,33 @@
         </div>
       </div>
 
-      <!-- ── PIECE RATE ── -->
-      <div id="page-piece-rate" class="page">
+      <!-- ── BUILD PAY ── -->
+      <div id="page-build-pay" class="page">
         <!-- Week selector -->
         <div style="display:flex; align-items:center; gap:12px; margin-bottom:20px; flex-wrap:wrap;">
           <label style="margin:0; font-size:13px; font-weight:600; color:var(--gray-600)">Week:</label>
-          <select id="pr-week-select" onchange="loadPieceRatePage()" style="width:auto; padding:7px 12px; min-width:220px;">
+          <select id="bp-week-select" onchange="loadBuildPayPage()" style="width:auto; padding:7px 12px; min-width:220px;">
             <option value="">— Loading weeks —</option>
           </select>
-          <span id="pr-summary" style="margin-left:auto; font-size:12px; color:var(--gray-600);"></span>
+          <span id="bp-summary" style="margin-left:auto; font-size:12px; color:var(--gray-600);"></span>
         </div>
 
-        <!-- Stat cards -->
+        <!-- Stat cards — Build-only -->
         <div class="stat-grid">
-          <div class="stat-card"><div class="stat-label">Piece Pay (Regular)</div><div class="stat-value" id="pr-stat-piece">—</div><div class="stat-sub" id="pr-stat-piece-sub">selected week</div></div>
-          <div class="stat-card"><div class="stat-label">Build Pay</div><div class="stat-value" id="pr-stat-build">—</div><div class="stat-sub" id="pr-stat-build-sub">selected week</div></div>
-          <div class="stat-card"><div class="stat-label">Total Piece+Build</div><div class="stat-value" id="pr-stat-total">—</div><div class="stat-sub" id="pr-stat-total-sub">selected week</div></div>
-          <div class="stat-card"><div class="stat-label">Flags</div><div class="stat-value" id="pr-stat-flags" style="color:var(--red)">—</div><div class="stat-sub">need review</div></div>
+          <div class="stat-card"><div class="stat-label">Build Pay</div><div class="stat-value" id="bp-stat-total">—</div><div class="stat-sub" id="bp-stat-total-sub">selected week</div></div>
+          <div class="stat-card"><div class="stat-label">Builders Paid</div><div class="stat-value" id="bp-stat-workers">—</div><div class="stat-sub">active this week</div></div>
+          <div class="stat-card"><div class="stat-label">Submissions</div><div class="stat-value" id="bp-stat-subs">—</div><div class="stat-sub">builds logged</div></div>
+          <div class="stat-card"><div class="stat-label">Flags</div><div class="stat-value" id="bp-stat-flags" style="color:var(--red)">—</div><div class="stat-sub">need review</div></div>
         </div>
 
-        <!-- Flags banner (shows specific issues) -->
-        <div id="pr-flags-banner" style="display:none; background:#FFE0E0; border-left:4px solid #C0392B; padding:10px 14px; border-radius:6px; margin-top:12px; margin-bottom:12px; font-size:13px; color:#6D1A13;">
-          <strong>🚩 <span id="pr-flags-count"></span> issue(s) need review</strong> — fix in Master Rates or Submissions, then refresh.
+        <!-- Flags banner -->
+        <div id="bp-flags-banner" style="display:none; background:#FFE0E0; border-left:4px solid #C0392B; padding:10px 14px; border-radius:6px; margin-top:12px; margin-bottom:12px; font-size:13px; color:#6D1A13;">
+          <strong>🚩 <span id="bp-flags-count"></span> issue(s) need review</strong> — fix in Master Rates or Submissions, then refresh.
         </div>
 
-        <!-- Submissions table -->
+        <!-- Build submissions table -->
         <div class="section-header" style="margin-top:16px;">
-          <h3>Submissions — Piece Rate + Build</h3>
+          <h3>Build Submissions</h3>
         </div>
         <div class="table-wrap">
           <table>
@@ -750,7 +750,7 @@
                 <th>Earnings</th>
               </tr>
             </thead>
-            <tbody id="pr-submissions-table">
+            <tbody id="bp-submissions-table">
               <tr><td colspan="8" style="padding:32px; text-align:center; color:var(--gray-400)">Select a week above</td></tr>
             </tbody>
           </table>
@@ -1288,7 +1288,7 @@ function nav(page) {
     dashboard: 'Dashboard', 'run-payroll': 'Run Payroll',
     workers: 'Hourly', history: 'Week History',
     submissions: 'Submissions', rates: 'Master Rates',
-    'piece-rate': 'Piece Rate',
+    'build-pay': 'Build Pay',
     performance: 'Performance', staff: 'Staff',
     stations: 'Stations',
     'print-slips': 'Print Slips'
@@ -1305,7 +1305,7 @@ function nav(page) {
   if (page === 'history')     loadHistory();
   if (page === 'workers')     loadWorkersTab();
   if (page === 'submissions') loadSubmissions();
-  if (page === 'piece-rate')  loadPieceRatePage();
+  if (page === 'build-pay')   loadBuildPayPage();
   if (page === 'performance') loadPerformancePage();
   if (page === 'print-slips') loadPrintSlipsPage();
   if (page === 'staff')       loadStaff();
@@ -3594,14 +3594,14 @@ function renderSubmissions(subs) {
 
 // ── MASTER RATES ──────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════
-// PIECE RATE PAGE — shows every piece & build submission for the week,
-// re-validates flags on each load (missing rate / BOL qty / late submission).
-// Logic ported from Google Apps Script runWeeklyPayroll / processPieceRate.
+// BUILD PAY PAGE — shows build submissions for the week, calculates builders' pay.
+// Stripping/Cutting piece submissions are performance-only and NOT paid from here.
+// Re-validates flags on each load (missing rate / BOL qty / late submission).
 // ══════════════════════════════════════════════════════════════
-async function loadPieceRatePage() {
-  const sel = document.getElementById('pr-week-select');
+async function loadBuildPayPage() {
+  const sel = document.getElementById('bp-week-select');
 
-  // Populate the week dropdown (first time only)
+  // Populate week dropdown once
   if (sel.dataset.populated !== 'true') {
     const { data: weeks } = await sb.from('week_periods')
       .select('id, label, week_start, week_end')
@@ -3609,7 +3609,7 @@ async function loadPieceRatePage() {
 
     if (!weeks || weeks.length === 0) {
       sel.innerHTML = '<option value="">— No weeks available —</option>';
-      document.getElementById('pr-submissions-table').innerHTML =
+      document.getElementById('bp-submissions-table').innerHTML =
         '<tr><td colspan="8" style="padding:32px; text-align:center; color:var(--gray-400)">No weeks in the system yet. Run payroll first.</td></tr>';
       return;
     }
@@ -3635,29 +3635,21 @@ async function loadPieceRatePage() {
   const weekEnd   = selOpt.dataset.weekEnd;
   const label     = selOpt.dataset.label;
 
-  // Update stat-card subtitles
-  document.getElementById('pr-stat-piece-sub').textContent = label || 'selected week';
-  document.getElementById('pr-stat-build-sub').textContent = label || 'selected week';
-  document.getElementById('pr-stat-total-sub').textContent = label || 'selected week';
+  document.getElementById('bp-stat-total-sub').textContent = label || 'selected week';
 
-  // Fetch everything we need in parallel
-  // (If Supabase returns nothing for any of these, we degrade gracefully)
-  const [pieceResult, buildResult, rateResult] = await Promise.all([
-    sb.from('piece_submissions')
-      .select('worker_name, work_date, bol_number, prod_type, qty, customer_name, size, bol_qty, submitted_at')
-      .eq('week_id', weekId),
+  // Fetch Build submissions + rate table (Build-only workflow)
+  const [buildResult, rateResult] = await Promise.all([
     sb.from('build_submissions')
       .select('worker_name, build_date, bol_number, production_type, qty, customer_name, size, bol_quantity, submitted_at, team_with')
       .gte('build_date', weekStart).lte('build_date', weekEnd),
     sb.from('master_rates').select('customer_name, prod_type, size, rate, type')
   ]);
 
-  const pieceRows = pieceResult.data || [];
   const buildRows = buildResult.data || [];
   const rateRows  = rateResult.data  || [];
 
-  // Build the rate lookup map — key = customer|size|type (lowercase, trimmed)
-  // Accepts either `prod_type` or `type` as the column name (Supabase schema drift)
+  // Build the rate lookup map — key = customer|size|type (all lowercase, trimmed)
+  // Your master_rates may use either `prod_type` or `type` column name
   const rateMap = {};
   rateRows.forEach(r => {
     const customer = clean(r.customer_name);
@@ -3665,92 +3657,57 @@ async function loadPieceRatePage() {
     const type     = clean(r.prod_type || r.type);
     if (!customer || !size || r.rate == null) return;
     rateMap[customer + '|' + size + '|' + type] = parseFloat(r.rate);
-    // Fallback: customer|size without type (matches your Apps Script)
     if (!rateMap[customer + '|' + size]) rateMap[customer + '|' + size] = parseFloat(r.rate);
   });
 
-  // Normalize piece + build into a unified entry shape used by the flag logic
-  const entries = [];
-
-  pieceRows.forEach(p => {
-    const workDate = p.work_date;  // 'yyyy-mm-dd'
-    const subDate  = p.submitted_at ? new Date(p.submitted_at) : null;
-    const daysLate = (workDate && subDate)
-      ? Math.floor((subDate - new Date(workDate)) / (1000 * 60 * 60 * 24))
-      : 0;
-    entries.push({
-      source:    'piece',
-      worker:    (p.worker_name || '').trim(),
-      date:      workDate,
-      bol:       (p.bol_number   || '').trim(),
-      customer:  (p.customer_name|| '').trim(),
-      size:      (p.size         || '').trim(),
-      prodType:  (p.prod_type    || '').trim().toLowerCase(),    // 'solo' / 'team' / ''
-      qty:       parseFloat(p.qty) || 0,
-      bolQty:    parseFloat(p.bol_qty) || 0,
-      isLate:    daysLate > 7,
-      issue:     ''
-    });
-  });
-
-  buildRows.forEach(b => {
+  // Normalize each build submission into the entry shape the flag logic expects
+  const entries = buildRows.map(b => {
     const workDate = b.build_date;
     const subDate  = b.submitted_at ? new Date(b.submitted_at) : null;
     const daysLate = (workDate && subDate)
       ? Math.floor((subDate - new Date(workDate)) / (1000 * 60 * 60 * 24))
       : 0;
-    entries.push({
-      source:    'build',
+    return {
       worker:    (b.worker_name || '').trim(),
       date:      workDate,
       bol:       (b.bol_number   || '').trim(),
       customer:  (b.customer_name|| '').trim(),
       size:      (b.size         || '').trim(),
-      // Build rows use 'Solo'/'Team' (capitalized in DB) — lowercase for matching
-      prodType:  (b.production_type || '').trim().toLowerCase(),
+      prodType:  (b.production_type || '').trim().toLowerCase(),  // 'solo' or 'team'
       qty:       parseFloat(b.qty) || 0,
       bolQty:    parseFloat(b.bol_quantity) || 0,
       teamWith:  (b.team_with || '').trim(),
       isLate:    daysLate > 7,
-      issue:     ''
-    });
+      issue:     '',
+      rate:      null
+    };
   });
 
   // ── Rate lookup + missing-customer/size validation ──
-  // (exact logic from your Apps Script)
   entries.forEach(e => {
     if (!e.customer || !e.size) {
       e.issue = 'Missing customer or size';
-      e.rate  = null;
       return;
     }
-    // Determine rate key based on source + type:
-    // - piece 'solo' or 'team' → exact match, fallback to customer|size
-    // - build 'solo' → 'Build Solo', 'team' → 'Build Team' (per your rate table)
-    let typeKey;
-    if (e.source === 'build') {
-      typeKey = e.prodType === 'team' ? clean('Build Team') : clean('Build Solo');
-    } else {
-      typeKey = e.prodType;  // 'solo' or 'team' for piece rows
-    }
-    const key = clean(e.customer) + '|' + clean(e.size) + '|' + typeKey;
+    // Build rates use "Build Solo" / "Build Team" in the Type column
+    const typeKey = e.prodType === 'team' ? clean('Build Team') : clean('Build Solo');
+    const key      = clean(e.customer) + '|' + clean(e.size) + '|' + typeKey;
     const fallback = clean(e.customer) + '|' + clean(e.size);
     if (rateMap[key] != null)           e.rate = rateMap[key];
     else if (rateMap[fallback] != null) e.rate = rateMap[fallback];
     else {
       e.rate  = null;
-      e.issue = 'No rate: ' + e.customer + ' | ' + e.size + ' | ' + (e.source === 'build' ? 'Build ' + (e.prodType || '?') : e.prodType);
+      e.issue = 'No rate: ' + e.customer + ' | ' + e.size + ' | Build ' + (e.prodType || '?');
     }
   });
 
-  // ── BOL validation — group by BOL + Size (your bug fix) ──
+  // ── BOL qty validation — grouped by BOL + Size (matches Apps Script bug fix) ──
   const bolMap = {};
   entries.forEach(e => {
     const key = e.bol + '|' + clean(e.size);
     if (!bolMap[key]) bolMap[key] = { bolQty: e.bolQty, solo: [], team: [] };
-    // Treat 'team' (lowercase, from piece) and 'team' (from build) as same group
     if (e.prodType === 'solo') bolMap[key].solo.push(e);
-    else                       bolMap[key].team.push(e);   // default to team bucket for anything non-solo
+    else                       bolMap[key].team.push(e);
   });
 
   Object.keys(bolMap).forEach(key => {
@@ -3775,37 +3732,35 @@ async function loadPieceRatePage() {
     }
   });
 
-  // ── Compute totals + flag count ──
-  let grandPiece = 0, grandBuild = 0, flagCount = 0;
+  // ── Compute totals ──
+  let grandPay = 0, flagCount = 0;
+  const workersSeen = new Set();
   entries.forEach(e => {
-    const earn = (e.rate != null) ? (e.qty * e.rate) : 0;
-    if (e.source === 'build') grandBuild += earn;
-    else                      grandPiece += earn;
+    if (e.rate != null) grandPay += e.qty * e.rate;
     if (e.issue) flagCount++;
+    if (e.worker) workersSeen.add(e.worker);
   });
 
-  // Update stat cards
-  document.getElementById('pr-stat-piece').textContent = fmtMoney(grandPiece);
-  document.getElementById('pr-stat-build').textContent = fmtMoney(grandBuild);
-  document.getElementById('pr-stat-total').textContent = fmtMoney(grandPiece + grandBuild);
-  document.getElementById('pr-stat-flags').textContent = flagCount;
+  document.getElementById('bp-stat-total').textContent   = fmtMoney(grandPay);
+  document.getElementById('bp-stat-workers').textContent = workersSeen.size;
+  document.getElementById('bp-stat-subs').textContent    = entries.length;
+  document.getElementById('bp-stat-flags').textContent   = flagCount;
 
-  // Flag banner at top — tells user how many rows need review
-  const banner = document.getElementById('pr-flags-banner');
+  const banner = document.getElementById('bp-flags-banner');
   if (flagCount > 0) {
-    document.getElementById('pr-flags-count').textContent = flagCount;
+    document.getElementById('bp-flags-count').textContent = flagCount;
     banner.style.display = 'block';
   } else {
     banner.style.display = 'none';
   }
 
-  document.getElementById('pr-summary').textContent =
-    entries.length + ' submission' + (entries.length === 1 ? '' : 's') + ' · ' + fmtMoney(grandPiece + grandBuild);
+  document.getElementById('bp-summary').textContent =
+    entries.length + ' build' + (entries.length === 1 ? '' : 's') + ' · ' + fmtMoney(grandPay);
 
-  // ── Render the submissions table ──
-  const tbody = document.getElementById('pr-submissions-table');
+  // ── Render table ──
+  const tbody = document.getElementById('bp-submissions-table');
   if (entries.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="8" style="padding:32px; text-align:center; color:var(--gray-400)">No submissions for this week.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" style="padding:32px; text-align:center; color:var(--gray-400)">No build submissions for this week.</td></tr>';
     return;
   }
 
@@ -3820,26 +3775,17 @@ async function loadPieceRatePage() {
     const tr = document.createElement('tr');
     if (e.issue) tr.style.background = '#FFE0E0';
 
-    // Worker cell with 🚩 / 🕐 markers (matching your Apps Script convention)
+    // Worker cell with 🚩 / 🕐 markers
     let workerCell = '<strong>' + (e.worker || '—') + '</strong>';
     if (e.issue)  workerCell += ' <span title="' + e.issue.replace(/"/g, '&quot;') + '" style="font-size:14px;">🚩</span>';
     if (e.isLate) workerCell += ' <span title="Late submission" style="font-size:14px;">🕐</span>';
 
-    // Date — short format
-    const dateCell = e.date ? formatShortDate(e.date) : '—';
-
-    // Size | Type — matches your weekly tab layout
-    const typeLabel = e.source === 'build'
-      ? 'Build ' + (e.prodType || '?')
-      : (e.prodType || '?');
+    const dateCell     = e.date ? formatShortDate(e.date) : '—';
+    const typeLabel    = 'Build ' + (e.prodType || '?');
     const sizeTypeCell = (e.size || '—') + ' | ' + typeLabel;
-
-    // Earnings
-    const earnings = (e.rate != null) ? (e.qty * e.rate) : 0;
-    const earnCell = earnings > 0 ? fmtMoney(earnings) : '<span class="td-muted">—</span>';
-
-    // Rate — shown plain, in gray
-    const rateCell = (e.rate != null) ? '<span style="color:#888;">$' + Number(e.rate).toFixed(4) + '</span>' : '<span class="td-muted">—</span>';
+    const earnings     = (e.rate != null) ? (e.qty * e.rate) : 0;
+    const earnCell     = earnings > 0 ? fmtMoney(earnings) : '<span class="td-muted">—</span>';
+    const rateCell     = (e.rate != null) ? '<span style="color:#888;">$' + Number(e.rate).toFixed(4) + '</span>' : '<span class="td-muted">—</span>';
 
     tr.innerHTML =
         '<td>' + workerCell + '</td>'
