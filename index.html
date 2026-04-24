@@ -662,12 +662,41 @@
 
       <!-- ── SUBMISSIONS (unified piece + build) ── -->
       <div id="page-submissions" class="page">
-        <!-- Controls row: search + week filter + type filter + manual entry button -->
+        <!-- Controls row: search + week filter + date picker + type filter + manual entry button -->
         <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px; flex-wrap:wrap;">
           <input type="text" id="sub-search" placeholder="Search worker, customer, BOL..." style="width:260px;" oninput="filterSubmissions()" />
-          <select id="sub-filter-week" onchange="filterSubmissions()" style="width:180px;">
+          <select id="sub-filter-week" onchange="onWeekFilterChange()" style="width:180px;">
             <option value="">All weeks</option>
           </select>
+
+          <!-- Custom calendar date filter — single date or range -->
+          <div style="position:relative;">
+            <button id="date-filter-btn" type="button" onclick="toggleDateCalendar(event)" class="btn btn-outline btn-sm" style="display:inline-flex; align-items:center; gap:6px;">
+              <span>📅</span>
+              <span id="date-filter-label">Date filter</span>
+              <span id="date-filter-clear" onclick="clearDateFilter(event)" style="display:none; margin-left:4px; opacity:0.6; font-weight:700;">×</span>
+            </button>
+            <div id="date-calendar-popup" style="display:none; position:absolute; top:calc(100% + 6px); left:0; z-index:200; background:#fff; border:1px solid var(--gray-200); border-radius:10px; box-shadow:0 8px 24px rgba(0,0,0,0.12); padding:14px; min-width:280px;">
+              <!-- Header: prev / month-year / next -->
+              <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+                <button type="button" onclick="calendarNavMonth(-1)" style="background:none; border:none; cursor:pointer; font-size:18px; color:var(--gray-600); padding:4px 8px;">‹</button>
+                <div id="cal-month-label" style="font-weight:700; color:var(--navy); font-size:14px;"></div>
+                <button type="button" onclick="calendarNavMonth(1)" style="background:none; border:none; cursor:pointer; font-size:18px; color:var(--gray-600); padding:4px 8px;">›</button>
+              </div>
+              <!-- Weekday headers -->
+              <div style="display:grid; grid-template-columns:repeat(7,1fr); gap:2px; font-size:10px; color:var(--gray-400); text-align:center; margin-bottom:4px; font-weight:600; text-transform:uppercase;">
+                <div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div>
+              </div>
+              <!-- Day grid (filled by JS) -->
+              <div id="cal-grid" style="display:grid; grid-template-columns:repeat(7,1fr); gap:2px;"></div>
+              <!-- Footer: hint + clear/apply -->
+              <div style="margin-top:10px; padding-top:10px; border-top:1px solid var(--gray-100); display:flex; align-items:center; justify-content:space-between; gap:8px;">
+                <div id="cal-hint" style="font-size:11px; color:var(--gray-400);">Click a date for single day, click another for range</div>
+                <button type="button" onclick="resetCalendarSelection()" style="background:none; border:none; cursor:pointer; font-size:11px; color:var(--gray-600); padding:4px 8px; text-decoration:underline;">Reset</button>
+              </div>
+            </div>
+          </div>
+
           <select id="sub-filter-type" onchange="filterSubmissions()" style="width:140px;">
             <option value="">All types</option>
             <option value="Regular">Regular</option>
@@ -3763,6 +3792,242 @@ function friendlyWeekLabel(mondayStr, sundayStr) {
   return months[m.getMonth()] + ' ' + m.getDate() + ' - ' + months[s.getMonth()] + ' ' + s.getDate() + ', ' + s.getFullYear();
 }
 
+// ══════════════════════════════════════════════════════════════
+// CUSTOM CALENDAR DATE FILTER (Submissions page)
+// Supports both single-date and date-range selection.
+//   - 1st click → sets start (single-day mode)
+//   - 2nd click later than start → sets end (range mode)
+//   - 2nd click earlier than start → swaps to make a valid range
+//   - 3rd click → resets, treats new click as new start
+// Picking dates clears the week dropdown (date filter overrides week).
+// Days that have submissions are marked with a small dot.
+// ══════════════════════════════════════════════════════════════
+
+// State
+let calendarViewMonth   = null;       // Date object — what month is currently displayed
+let calendarSelStart    = null;       // 'yyyy-mm-dd' or null
+let calendarSelEnd      = null;       // 'yyyy-mm-dd' or null
+let submissionDatesWithData = new Set();   // populated from allSubmissions
+
+// Toggle calendar visibility. Called by the date-filter button.
+function toggleDateCalendar(event) {
+  if (event) event.stopPropagation();
+  const popup = document.getElementById('date-calendar-popup');
+  const isOpen = popup.style.display === 'block';
+  if (isOpen) {
+    popup.style.display = 'none';
+    return;
+  }
+
+  // Initialize the view month if not set
+  if (!calendarViewMonth) {
+    // Default to the month of the current selection (if any) or today
+    const baseDate = calendarSelStart ? new Date(calendarSelStart + 'T12:00:00') : new Date();
+    calendarViewMonth = new Date(baseDate.getFullYear(), baseDate.getMonth(), 1);
+  }
+
+  // Refresh the data set of dates with submissions (so dots stay current)
+  refreshSubmissionDatesSet();
+
+  popup.style.display = 'block';
+  renderCalendarGrid();
+}
+
+// Build a Set of yyyy-mm-dd strings from allSubmissions for the dot markers
+function refreshSubmissionDatesSet() {
+  submissionDatesWithData = new Set();
+  (allSubmissions || []).forEach(s => {
+    if (s.date) submissionDatesWithData.add(s.date);
+  });
+}
+
+// Navigate to previous/next month
+function calendarNavMonth(delta) {
+  if (!calendarViewMonth) calendarViewMonth = new Date();
+  calendarViewMonth = new Date(
+    calendarViewMonth.getFullYear(),
+    calendarViewMonth.getMonth() + delta,
+    1
+  );
+  renderCalendarGrid();
+}
+
+// Render the day grid for the current calendarViewMonth
+function renderCalendarGrid() {
+  const monthLabel = document.getElementById('cal-month-label');
+  const grid = document.getElementById('cal-grid');
+  if (!monthLabel || !grid) return;
+
+  const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  monthLabel.textContent = months[calendarViewMonth.getMonth()] + ' ' + calendarViewMonth.getFullYear();
+
+  const year  = calendarViewMonth.getFullYear();
+  const month = calendarViewMonth.getMonth();
+
+  // First day of month → which weekday it is (0=Sun)
+  const firstDayOfWeek = new Date(year, month, 1).getDay();
+  // Last day of month
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  const todayStr = new Date().toISOString().split('T')[0];
+
+  let html = '';
+
+  // Empty cells before the 1st
+  for (let i = 0; i < firstDayOfWeek; i++) {
+    html += '<div></div>';
+  }
+
+  // Day cells
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dateStr = year + '-'
+      + String(month + 1).padStart(2, '0') + '-'
+      + String(day).padStart(2, '0');
+
+    const hasData = submissionDatesWithData.has(dateStr);
+    const isToday = dateStr === todayStr;
+    const isStart = dateStr === calendarSelStart;
+    const isEnd   = dateStr === calendarSelEnd;
+    const isInRange = calendarSelStart && calendarSelEnd
+      && dateStr > calendarSelStart && dateStr < calendarSelEnd;
+    const isSelected = isStart || isEnd;
+
+    let bg = 'transparent', fg = 'var(--gray-800)', border = '1px solid transparent', fontWeight = '400';
+
+    if (isSelected) {
+      bg = 'var(--navy)';
+      fg = '#fff';
+      fontWeight = '700';
+    } else if (isInRange) {
+      bg = '#EBF3FF';
+      fg = 'var(--navy)';
+    } else if (isToday) {
+      border = '1px solid var(--navy)';
+      fontWeight = '700';
+    }
+
+    html += '<div onclick="onCalendarDayClick(\'' + dateStr + '\')" '
+         + 'style="position:relative; padding:8px 0; text-align:center; cursor:pointer; '
+         + 'border-radius:6px; font-size:13px; '
+         + 'background:' + bg + '; color:' + fg + '; border:' + border + '; '
+         + 'font-weight:' + fontWeight + ';" '
+         + 'onmouseover="if(!this.dataset.sel) this.style.background=\'var(--gray-100)\';" '
+         + 'onmouseout="if(!this.dataset.sel) this.style.background=\'' + bg + '\';" '
+         + (isSelected ? 'data-sel="1"' : '')
+         + '>'
+         + day
+         + (hasData ? '<div style="position:absolute; bottom:3px; left:50%; transform:translateX(-50%); width:4px; height:4px; border-radius:50%; background:' + (isSelected ? '#fff' : 'var(--green)') + ';"></div>' : '')
+         + '</div>';
+  }
+
+  grid.innerHTML = html;
+}
+
+// Handle clicks on a day cell
+function onCalendarDayClick(dateStr) {
+  // No selection yet → set start
+  if (!calendarSelStart) {
+    calendarSelStart = dateStr;
+    calendarSelEnd = null;
+  }
+  // Have a start but no end → set end (or reset if clicking the same day)
+  else if (calendarSelStart && !calendarSelEnd) {
+    if (dateStr === calendarSelStart) {
+      // Clicking the same day twice = single-day filter (do nothing, already set)
+    } else if (dateStr < calendarSelStart) {
+      // Clicked earlier than start → swap
+      calendarSelEnd   = calendarSelStart;
+      calendarSelStart = dateStr;
+    } else {
+      calendarSelEnd = dateStr;
+    }
+  }
+  // Have both start and end → reset to new start
+  else {
+    calendarSelStart = dateStr;
+    calendarSelEnd = null;
+  }
+
+  renderCalendarGrid();
+  applyCalendarFilter();
+}
+
+// Reset selection (called by Reset button)
+function resetCalendarSelection() {
+  calendarSelStart = null;
+  calendarSelEnd   = null;
+  renderCalendarGrid();
+  applyCalendarFilter();
+}
+
+// Clear the date filter entirely (called by × on the button)
+function clearDateFilter(event) {
+  if (event) event.stopPropagation();
+  calendarSelStart = null;
+  calendarSelEnd   = null;
+  // Don't open the popup
+  document.getElementById('date-calendar-popup').style.display = 'none';
+  applyCalendarFilter();
+}
+
+// Apply the current selection: update button label, clear week dropdown, re-filter
+function applyCalendarFilter() {
+  const labelEl   = document.getElementById('date-filter-label');
+  const clearEl   = document.getElementById('date-filter-clear');
+  const btnEl     = document.getElementById('date-filter-btn');
+  const weekSel   = document.getElementById('sub-filter-week');
+
+  if (calendarSelStart) {
+    // Active filter — update label, show ×, clear week dropdown
+    if (calendarSelEnd && calendarSelEnd !== calendarSelStart) {
+      labelEl.textContent = formatShortDate(calendarSelStart) + ' → ' + formatShortDate(calendarSelEnd);
+    } else {
+      labelEl.textContent = formatShortDate(calendarSelStart);
+    }
+    clearEl.style.display = 'inline';
+    btnEl.style.background = 'var(--navy)';
+    btnEl.style.color = '#fff';
+    btnEl.style.borderColor = 'var(--navy)';
+    // Clear the week dropdown — date filter wins
+    if (weekSel.value) weekSel.value = '';
+  } else {
+    labelEl.textContent = 'Date filter';
+    clearEl.style.display = 'none';
+    btnEl.style.background = '';
+    btnEl.style.color = '';
+    btnEl.style.borderColor = '';
+  }
+
+  filterSubmissions();
+}
+
+// Wrapper for the week dropdown's onchange — clears any date filter when user picks a week
+function onWeekFilterChange() {
+  // If a date filter is active, clear it first (week filter wins now)
+  if (calendarSelStart) {
+    calendarSelStart = null;
+    calendarSelEnd   = null;
+    document.getElementById('date-filter-label').textContent = 'Date filter';
+    document.getElementById('date-filter-clear').style.display = 'none';
+    const btnEl = document.getElementById('date-filter-btn');
+    btnEl.style.background = '';
+    btnEl.style.color = '';
+    btnEl.style.borderColor = '';
+  }
+  filterSubmissions();
+}
+
+// Click outside the popup → close it
+document.addEventListener('click', function(e) {
+  const popup = document.getElementById('date-calendar-popup');
+  const btn   = document.getElementById('date-filter-btn');
+  if (!popup || !btn) return;
+  if (popup.style.display !== 'block') return;
+  // If click is inside the popup or on the button, ignore
+  if (popup.contains(e.target) || btn.contains(e.target)) return;
+  popup.style.display = 'none';
+});
+
 async function loadSubmissions() {
   // Fetch submissions FIRST so we can compute weeks from their dates
   const [pieceResult, buildResult] = await Promise.all([
@@ -3868,6 +4133,13 @@ function filterSubmissions() {
       if (s.source === 'piece') return s.week_id === weekId;
       return s.date >= wStart && s.date <= wEnd;
     });
+  }
+
+  // Date filter (calendar widget) — overrides week filter when active
+  if (calendarSelStart) {
+    const dStart = calendarSelStart;
+    const dEnd   = calendarSelEnd || calendarSelStart;  // single-day mode = same
+    filtered = filtered.filter(s => s.date >= dStart && s.date <= dEnd);
   }
 
   if (typeF) {
