@@ -3661,27 +3661,110 @@ async function runBulkImport() {
   }, 1200);
 }
 
-async function loadSubmissions() {
-  // Populate the week filter dropdown (first time only)
+// Build the Submissions page's week dropdown by merging:
+//   1. Real "processed" weeks from week_periods (with their nice labels)
+//   2. Auto-detected weeks from any submission dates that fall outside processed weeks
+// The merged list is sorted newest first so today's week is at the top.
+async function populateSubmissionsWeekDropdown(pieceRows, buildRows) {
   const weekSel = document.getElementById('sub-filter-week');
-  if (weekSel.dataset.populated !== 'true') {
-    const { data: weeks } = await sb.from('week_periods')
-      .select('id, label, week_start, week_end')
-      .order('week_start', { ascending: false });
-    weekSel.innerHTML = '<option value="">All weeks</option>';
-    (weeks || []).forEach(w => {
-      const opt = document.createElement('option');
-      opt.value = w.id;
-      opt.dataset.weekStart = w.week_start;
-      opt.dataset.weekEnd   = w.week_end;
-      opt.textContent = w.label || (w.week_start + ' → ' + w.week_end);
-      weekSel.appendChild(opt);
-    });
-    weekSel.dataset.populated = 'true';
-  }
+  const previousValue = weekSel.value;  // remember user's current selection so we can restore it
 
-  // Fetch BOTH tables in parallel and normalize into a single unified shape.
-  // Unified row fields: date, worker, customer, size, bol, type, qty, rate, earnings, flag, flag_note, week_id, source
+  // Step 1: fetch the processed weeks
+  const { data: processed } = await sb.from('week_periods')
+    .select('id, label, week_start, week_end')
+    .order('week_start', { ascending: false });
+
+  // Step 2: build a map of weeks by week_start (Monday) so we can dedupe
+  // Each entry: { value, weekStart, weekEnd, label, isProcessed }
+  const weekMap = {};
+
+  // Add processed weeks first (their labels win in case of dupes)
+  (processed || []).forEach(w => {
+    weekMap[w.week_start] = {
+      value: w.id,
+      weekStart: w.week_start,
+      weekEnd:   w.week_end,
+      label:     w.label || (w.week_start + ' → ' + w.week_end),
+      isProcessed: true
+    };
+  });
+
+  // Step 3: walk every submission and compute its Monday-based week
+  // Add it to the map only if no processed week already covers that Monday
+  const allDates = [];
+  pieceRows.forEach(p => { if (p.work_date)  allDates.push(p.work_date); });
+  buildRows.forEach(b => { if (b.build_date) allDates.push(b.build_date); });
+
+  allDates.forEach(dateStr => {
+    const monday = mondayOf(dateStr);
+    if (weekMap[monday]) return;  // already in the map
+    const sunday = addDays(monday, 6);
+    weekMap[monday] = {
+      value: 'auto:' + monday,           // synthetic value so filter knows it's not a real week_id
+      weekStart: monday,
+      weekEnd:   sunday,
+      label:     friendlyWeekLabel(monday, sunday),
+      isProcessed: false
+    };
+  });
+
+  // Step 4: sort by weekStart descending (newest first)
+  const sortedWeeks = Object.values(weekMap).sort((a, b) =>
+    a.weekStart < b.weekStart ? 1 : a.weekStart > b.weekStart ? -1 : 0
+  );
+
+  // Step 5: rebuild the dropdown
+  const today = new Date();
+  const todayMonday = mondayOf(today.toISOString().split('T')[0]);
+
+  weekSel.innerHTML = '<option value="">All weeks</option>';
+  sortedWeeks.forEach(w => {
+    const opt = document.createElement('option');
+    opt.value = w.value;
+    opt.dataset.weekStart = w.weekStart;
+    opt.dataset.weekEnd   = w.weekEnd;
+    // Decorate the label to make context clear at a glance
+    let suffix = '';
+    if (w.weekStart === todayMonday)        suffix = '  (this week)';
+    else if (!w.isProcessed)                suffix = '  (not paid yet)';
+    opt.textContent = w.label + suffix;
+    weekSel.appendChild(opt);
+  });
+
+  // Restore previous selection if still present
+  if (previousValue) {
+    const stillThere = Array.from(weekSel.options).some(o => o.value === previousValue);
+    if (stillThere) weekSel.value = previousValue;
+  }
+}
+
+// Return the Monday of the week containing the given yyyy-mm-dd date string.
+// Returns yyyy-mm-dd of that Monday.
+function mondayOf(dateStr) {
+  const d = new Date(dateStr + 'T12:00:00');  // noon to dodge DST issues
+  const day = d.getDay();                      // 0=Sun, 1=Mon, ..., 6=Sat
+  const diff = day === 0 ? -6 : 1 - day;       // walk back to Monday
+  d.setDate(d.getDate() + diff);
+  return d.toISOString().split('T')[0];
+}
+
+// Add n days to a yyyy-mm-dd date and return the new yyyy-mm-dd.
+function addDays(dateStr, n) {
+  const d = new Date(dateStr + 'T12:00:00');
+  d.setDate(d.getDate() + n);
+  return d.toISOString().split('T')[0];
+}
+
+// Format a Monday + Sunday pair into a friendly label like "Apr 20 - Apr 26, 2026"
+function friendlyWeekLabel(mondayStr, sundayStr) {
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const m = new Date(mondayStr + 'T12:00:00');
+  const s = new Date(sundayStr + 'T12:00:00');
+  return months[m.getMonth()] + ' ' + m.getDate() + ' - ' + months[s.getMonth()] + ' ' + s.getDate() + ', ' + s.getFullYear();
+}
+
+async function loadSubmissions() {
+  // Fetch submissions FIRST so we can compute weeks from their dates
   const [pieceResult, buildResult] = await Promise.all([
     sb.from('piece_submissions').select('*').order('submitted_at', { ascending: false }),
     sb.from('build_submissions').select('*').order('submitted_at', { ascending: false })
@@ -3689,6 +3772,9 @@ async function loadSubmissions() {
 
   const pieceRows = pieceResult.data || [];
   const buildRows = buildResult.data || [];
+
+  // Always rebuild the week dropdown (so it stays current as new submissions arrive)
+  await populateSubmissionsWeekDropdown(pieceRows, buildRows);
 
   const unified = [];
 
@@ -3762,16 +3848,24 @@ function filterSubmissions() {
   }
 
   if (weekId) {
-    // Filter by week — we have week_id on piece rows, so check that.
-    // For build rows, match by date range (since builds aren't directly tagged to a week yet).
+    // Filter by week.
+    // For auto-detected weeks (value starts with 'auto:'), there's no real week_id —
+    // so we match purely by date range for both piece and build rows.
+    // For real processed weeks, piece rows have week_id we can match on directly.
     const opt = document.getElementById('sub-filter-week').options[
       document.getElementById('sub-filter-week').selectedIndex
     ];
     const wStart = opt.dataset.weekStart;
     const wEnd   = opt.dataset.weekEnd;
+    const isAutoWeek = weekId.indexOf('auto:') === 0;
+
     filtered = filtered.filter(s => {
+      if (isAutoWeek) {
+        // No real week_id exists yet — match by date range only
+        return s.date >= wStart && s.date <= wEnd;
+      }
+      // Real processed week
       if (s.source === 'piece') return s.week_id === weekId;
-      // build rows: match by build_date falling in the week
       return s.date >= wStart && s.date <= wEnd;
     });
   }
