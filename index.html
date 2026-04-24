@@ -664,7 +664,7 @@
       <div id="page-submissions" class="page">
         <!-- Controls row: search + week filter + date picker + type filter + manual entry button -->
         <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px; flex-wrap:wrap;">
-          <input type="text" id="sub-search" placeholder="Search worker, customer, BOL..." style="width:260px;" oninput="filterSubmissions()" />
+          <input type="text" id="sub-search" placeholder="Search worker, customer, BOL, size..." style="width:260px;" oninput="filterSubmissions()" />
           <select id="sub-filter-week" onchange="onWeekFilterChange()" style="width:180px;">
             <option value="">All weeks</option>
           </select>
@@ -4107,7 +4107,7 @@ function filterSubmissions() {
 
   if (search) {
     filtered = filtered.filter(s => {
-      const hay = [s.worker, s.customer, s.bol, s.partner].filter(Boolean).join(' ').toLowerCase();
+      const hay = [s.worker, s.customer, s.bol, s.partner, s.size].filter(Boolean).join(' ').toLowerCase();
       return hay.indexOf(search) !== -1;
     });
   }
