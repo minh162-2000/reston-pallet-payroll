@@ -4534,7 +4534,26 @@ async function loadBuildPayPage() {
     const sizeTypeCell = (e.size || '—') + ' | ' + typeLabel;
     const earnings     = (e.rate != null) ? (e.qty * e.rate) : 0;
     const earnCell     = earnings > 0 ? fmtMoney(earnings) : '<span class="td-muted">—</span>';
-    const rateCell     = (e.rate != null) ? '<span style="color:#888;">$' + Number(e.rate).toFixed(4) + '</span>' : '<span class="td-muted">—</span>';
+
+    // Rate cell — editable when missing rate AND we have a customer/size/type to associate it with.
+    // Click to type → blur to save → all matching rows update at once via setRateInline().
+    const canEdit  = !e.rate && e.customer && e.size && e.prodType;
+    const safeCust = (e.customer || '').replace(/'/g, "\\'");
+    const safeSize = (e.size     || '').replace(/'/g, "\\'");
+    const safeType = (e.prodType || '');
+    let rateCell;
+    if (e.rate != null && e.rate > 0) {
+      rateCell = '<span style="color:#888;">$' + Number(e.rate).toFixed(4) + '</span>';
+    } else if (canEdit) {
+      rateCell = '<span contenteditable="true" '
+        + 'onfocus="this.textContent=\'\'; this.style.background=\'#FFF8E1\';" '
+        + 'onblur="setRateInline(this, \'' + safeCust + '\', \'' + safeSize + '\', \'' + safeType + '\')" '
+        + 'onkeydown="if(event.key===\'Enter\'){event.preventDefault(); this.blur();}" '
+        + 'style="display:inline-block; min-width:60px; padding:2px 8px; border:1px dashed #C0392B; border-radius:4px; cursor:text; color:#C0392B; font-style:italic;" '
+        + 'title="Click to enter the rate for ' + safeCust + ' / ' + safeSize + ' / ' + safeType + '">click to set</span>';
+    } else {
+      rateCell = '<span class="td-muted">—</span>';
+    }
 
     tr.innerHTML =
         '<td>' + workerCell + '</td>'
@@ -4552,6 +4571,74 @@ async function loadBuildPayPage() {
 // Helper: normalize a string for rate-map keys (matches Apps Script cleanText)
 function clean(val) {
   return String(val || '').trim().toLowerCase();
+}
+
+// Save a rate inline from the Build Pay page.
+// Called when the user types a rate into a "click to set" cell and clicks away.
+// 1. Validates the input is a positive number
+// 2. Upserts into master_rates (so it appears on the Master Rates page going forward)
+// 3. Updates EVERY build_submission with matching customer+size+type to use this new rate
+// 4. Refreshes the Build Pay page so totals and flags reflect the new state
+async function setRateInline(el, customer, size, type) {
+  const raw = (el.textContent || '').trim().replace(/[$,\s]/g, '');
+  el.style.background = '';
+
+  // No input or invalid → silently revert (don't bug the user)
+  if (!raw) {
+    loadBuildPayPage();
+    return;
+  }
+  const rate = parseFloat(raw);
+  if (isNaN(rate) || rate < 0) {
+    alert('Please enter a valid rate (e.g. 0.45 or 1.20)');
+    loadBuildPayPage();
+    return;
+  }
+
+  // Visual feedback while saving
+  el.textContent = 'Saving...';
+  el.style.color = '#888';
+
+  // Step 1: upsert into master_rates so it persists for future builds
+  // (matches the same upsert pattern used in addRate())
+  const { error: rateErr } = await sb.from('master_rates').upsert({
+    customer_name: customer,
+    prod_type:     type,
+    size:          size,
+    rate:          rate,
+    updated_at:    new Date().toISOString()
+  }, { onConflict: 'customer_name,prod_type,size' });
+
+  if (rateErr) {
+    alert('Could not save rate: ' + rateErr.message);
+    loadBuildPayPage();
+    return;
+  }
+
+  // Step 2: update all matching build_submissions in one go
+  // We look up the actual rows to recalc earnings = qty * rate per row
+  const { data: matches } = await sb.from('build_submissions')
+    .select('id, qty')
+    .ilike('customer_name', customer)
+    .ilike('size', size)
+    .ilike('production_type', type);
+
+  if (matches && matches.length > 0) {
+    // Update each row's rate + earnings + clear the issue flag
+    // Doing them one at a time is fine — typical match count is < 50
+    const updates = matches.map(m =>
+      sb.from('build_submissions').update({
+        rate:       rate,
+        earnings:   Math.round((m.qty || 0) * rate * 100) / 100,
+        has_issue:  false,
+        issue_note: null
+      }).eq('id', m.id)
+    );
+    await Promise.all(updates);
+  }
+
+  // Step 3: refresh the Build Pay page so totals + flag count update
+  loadBuildPayPage();
 }
 
 async function loadRates() {
