@@ -788,17 +788,6 @@
 
       <!-- ── MASTER RATES ── -->
       <div id="page-rates" class="page">
-        <!-- Missing rates banner — surfaces customer/size combos used in submissions but not in master_rates -->
-        <div id="missing-rates-banner" style="display:none; background:#FFF3CC; border-left:4px solid #FFC107; padding:14px 18px; border-radius:6px; margin-bottom:16px;">
-          <div style="display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;">
-            <div style="font-size:13px; color:#6D5400;">
-              ⚠️ <strong><span id="missing-rates-count">0</span></strong> customer/size combo(s) in your build submissions are missing rates.
-              <div id="missing-rates-detail" style="font-size:12px; color:#8B6914; margin-top:4px;"></div>
-            </div>
-            <button class="btn btn-primary btn-sm" onclick="autoAddMissingRates()" id="missing-rates-btn">+ Auto-add missing rates</button>
-          </div>
-        </div>
-
         <div class="grid-2" style="align-items:start">
           <div>
             <div class="section-header">
@@ -4663,124 +4652,8 @@ async function loadRates() {
       tbody.appendChild(tr);
     });
   }
-
-  // Always run the missing-rates detector after loading
-  await detectMissingRates();
 }
 
-// ══════════════════════════════════════════════════════════════
-// MISSING RATES DETECTOR — finds customer/size/type combos used in
-// build_submissions that have no matching row in master_rates.
-// Surfaces them in a banner with an "Auto-add" button.
-// ══════════════════════════════════════════════════════════════
-async function detectMissingRates() {
-  const banner   = document.getElementById('missing-rates-banner');
-  const countEl  = document.getElementById('missing-rates-count');
-  const detailEl = document.getElementById('missing-rates-detail');
-
-  // Fetch both tables
-  const [subResult, rateResult] = await Promise.all([
-    sb.from('build_submissions').select('customer_name, size, production_type'),
-    sb.from('master_rates').select('customer_name, size, prod_type')
-  ]);
-  const subs  = subResult.data  || [];
-  const rates = rateResult.data || [];
-
-  // Build a Set of existing rate keys: 'customer|size|type' (all lowercase, trimmed)
-  const existingRates = new Set();
-  rates.forEach(r => {
-    if (!r.customer_name || !r.size || !r.prod_type) return;
-    existingRates.add(
-      r.customer_name.trim().toLowerCase() + '|' +
-      r.size.trim().toLowerCase()          + '|' +
-      r.prod_type.trim().toLowerCase()
-    );
-  });
-
-  // Collect unique submission combos that AREN'T in master_rates
-  // Skip rows missing required fields (can't lookup a rate without them anyway)
-  const missingMap = new Map();  // key: 'customer|size|type' → { customer, size, type, count }
-  subs.forEach(s => {
-    const customer = (s.customer_name || '').trim();
-    const size     = (s.size          || '').trim();
-    const type     = (s.production_type || '').trim().toLowerCase();
-    if (!customer || !size || !type) return;
-    const key = customer.toLowerCase() + '|' + size.toLowerCase() + '|' + type;
-    if (existingRates.has(key)) return;
-    if (missingMap.has(key)) {
-      missingMap.get(key).count++;
-    } else {
-      missingMap.set(key, { customer, size, type, count: 1 });
-    }
-  });
-
-  const missing = Array.from(missingMap.values());
-  // Stash on the banner so the auto-add button can read it
-  banner.dataset.missing = JSON.stringify(missing);
-
-  if (missing.length === 0) {
-    banner.style.display = 'none';
-    return;
-  }
-
-  // Sort by count desc so most-used missing combos are listed first
-  missing.sort((a, b) => b.count - a.count);
-
-  // Show the banner with a friendly summary of the top 3
-  banner.style.display = 'block';
-  countEl.textContent = missing.length;
-
-  const preview = missing.slice(0, 3).map(m =>
-    m.customer + ' (' + m.size + ' · ' + m.type + ', ' + m.count + 'x)'
-  ).join(' · ');
-  const moreText = missing.length > 3 ? ' …and ' + (missing.length - 3) + ' more' : '';
-  detailEl.textContent = 'Top: ' + preview + moreText;
-
-  // Update button label
-  const btn = document.getElementById('missing-rates-btn');
-  btn.textContent = '+ Auto-add ' + missing.length + ' missing rate' + (missing.length === 1 ? '' : 's');
-}
-
-// Auto-add: creates a master_rates row (with rate=0) for every missing combo,
-// then refreshes the page so the user can fill in the actual rates.
-async function autoAddMissingRates() {
-  const banner = document.getElementById('missing-rates-banner');
-  const btn    = document.getElementById('missing-rates-btn');
-  const data   = banner.dataset.missing;
-  if (!data) return;
-
-  const missing = JSON.parse(data);
-  if (missing.length === 0) return;
-
-  if (!confirm('Add ' + missing.length + ' new rate row(s) with $0.0000?\n\nYou\'ll need to fill in the actual rate for each one.\n\nThe rows will be highlighted yellow so they\'re easy to find.')) return;
-
-  btn.disabled = true;
-  btn.innerHTML = '<div class="spinner"></div> Adding...';
-
-  // Build the insert payload — one row per missing combo, rate=0
-  const payload = missing.map(m => ({
-    customer_name: m.customer,
-    prod_type:     m.type,
-    size:          m.size,
-    rate:          0,
-    updated_at:    new Date().toISOString()
-  }));
-
-  // Use upsert just in case some already exist (race conditions, etc.)
-  const { error } = await sb.from('master_rates').upsert(payload, {
-    onConflict: 'customer_name,prod_type,size'
-  });
-
-  if (error) {
-    alert('Could not add rates: ' + error.message);
-    btn.disabled = false;
-    btn.textContent = '+ Auto-add ' + missing.length + ' missing rates';
-    return;
-  }
-
-  // Refresh the rates table — banner will hide if all are added, zero-rate rows will be highlighted
-  await loadRates();
-}
 
 async function addRate() {
   const customer = document.getElementById('rate-customer').value.trim();
