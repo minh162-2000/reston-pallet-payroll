@@ -2741,6 +2741,109 @@ async function runPayroll() {
         .gte('work_date', weekStartStr).lt('work_date', weekEndStr);
     }
 
+    // ── BUILD SUBMISSIONS — same logic as the Build Pay page ──
+    // Fetch builds for this week, look up rates, calculate earnings, validate,
+    // and fold into pieceTotals + flags so they end up in worker_week_summary.
+    const { data: buildSubs } = await sb.from('build_submissions')
+      .select('*')
+      .gte('build_date', weekStartStr)
+      .lte('build_date', weekEndStr);
+
+    if (buildSubs && buildSubs.length > 0) {
+      // Normalize each row into the shape our flag/rate logic expects
+      const buildEntries = buildSubs.map(b => {
+        const workDate = b.build_date;
+        const subDate  = b.submitted_at ? new Date(b.submitted_at) : null;
+        const daysLate = (workDate && subDate)
+          ? Math.floor((subDate - new Date(workDate)) / (1000 * 60 * 60 * 24))
+          : 0;
+        return {
+          id:       b.id,
+          worker:   (b.worker_name || '').trim(),
+          date:     workDate,
+          bol:      (b.bol_number || '').trim(),
+          customer: (b.customer_name || '').trim(),
+          size:     (b.size || '').trim(),
+          prodType: (b.production_type || '').trim().toLowerCase(),  // 'solo' or 'team'
+          qty:      parseFloat(b.qty) || 0,
+          bolQty:   parseFloat(b.bol_quantity) || 0,
+          isLate:   daysLate > 7,
+          issue:    '',
+          rate:     null
+        };
+      });
+
+      // Rate lookup — same pattern as Build Pay page (lowercase keys)
+      buildEntries.forEach(e => {
+        if (!e.customer || !e.size) {
+          e.issue = 'Missing customer or size';
+          return;
+        }
+        const typeKey  = e.prodType;  // 'solo' or 'team'
+        const key      = e.customer.toLowerCase() + '|' + e.size.toLowerCase() + '|' + typeKey;
+        const fallback = e.customer.toLowerCase() + '|' + e.size.toLowerCase();
+        if (rateMap[key] != null)           e.rate = rateMap[key];
+        else if (rateMap[fallback] != null) e.rate = rateMap[fallback];
+        else {
+          e.rate  = null;
+          e.issue = 'No rate: ' + e.customer + ' | ' + e.size + ' | ' + (e.prodType || '?');
+        }
+      });
+
+      // BOL qty validation — group by BOL + Size (matches Build Pay page logic)
+      const buildBolMap = {};
+      buildEntries.forEach(e => {
+        const key = e.bol + '|' + e.size.toLowerCase();
+        if (!buildBolMap[key]) buildBolMap[key] = { bolQty: e.bolQty, solo: [], team: [] };
+        if (e.prodType === 'solo') buildBolMap[key].solo.push(e);
+        else                       buildBolMap[key].team.push(e);
+      });
+      Object.keys(buildBolMap).forEach(key => {
+        const b = buildBolMap[key];
+        if (!b.bolQty) return;
+        const soloTotal = b.solo.reduce((s, e) => s + e.qty, 0);
+        const maxTeam   = b.team.reduce((m, e) => Math.max(m, e.qty), 0);
+        if (soloTotal > b.bolQty) {
+          b.solo.forEach(e => { if (!e.issue) e.issue = 'Solo total (' + soloTotal + ') > BOL qty (' + b.bolQty + ')'; });
+        }
+        if (maxTeam > b.bolQty) {
+          b.team.forEach(e => { if (e.qty === maxTeam && !e.issue) e.issue = 'Team qty (' + e.qty + ') > BOL qty (' + b.bolQty + ')'; });
+        }
+      });
+
+      // Roll up earnings per worker → fold into pieceTotals so the summary write picks them up
+      // Also write back rate + earnings + has_issue + week_id to each build_submissions row
+      buildEntries.forEach(e => {
+        const earnings = (e.rate != null) ? (e.qty * e.rate) : 0;
+
+        if (e.issue) flags.push({
+          worker_name:   e.worker,
+          work_date:     e.date,
+          bol_number:    e.bol,
+          customer_name: e.customer,
+          size:          e.size,
+          prod_type:     e.prodType,
+          qty:           e.qty,
+          issue:         e.issue
+        });
+
+        if (e.worker) {
+          if (!pieceTotals[e.worker]) pieceTotals[e.worker] = { pay: 0, pieces: 0 };
+          pieceTotals[e.worker].pay    += earnings;
+          pieceTotals[e.worker].pieces += e.qty;
+        }
+
+        // Write back: tag with week_id, save the calculated rate, earnings, and any issue
+        sb.from('build_submissions').update({
+          week_id:    weekId,
+          rate:       e.rate,
+          earnings:   Math.round(earnings * 100) / 100,
+          has_issue:  !!e.issue,
+          issue_note: e.issue || null
+        }).eq('id', e.id);
+      });
+    }
+
     // Build worker week summary
     const allWorkers = new Set([...Object.keys(workerTotals), ...Object.keys(pieceTotals)]);
     const summaryRows = [];
