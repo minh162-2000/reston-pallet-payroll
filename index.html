@@ -489,16 +489,16 @@
             </div>
 
             <div class="card mt-16">
-              <div class="card-title">Step 3 — Tracker File <span style="font-weight:400; text-transform:none; letter-spacing:0; color:var(--gray-400); font-size:11px;">(optional, runs independently)</span></div>
-              <p class="text-muted" style="margin: 8px 0 12px">Upload the tracker .xlsx to add Floor/Zone times and late-to-station flags on the Hourly page.</p>
+              <div class="card-title">Step 3 — Time Tracker File <span style="font-weight:400; text-transform:none; letter-spacing:0; color:var(--gray-400); font-size:11px;">(optional, runs independently)</span></div>
+              <p class="text-muted" style="margin: 8px 0 12px">Upload the combined weekly .xlsx file. It has two sheets: <strong>Time Tracker</strong> (worker beacon data) and <strong>Station Daily (DB)</strong> (camera output). Both get processed together.</p>
 
-              <!-- Drop zone for tracker xlsx -->
+              <!-- Drop zone for combined tracker xlsx -->
               <div id="tracker-drop-zone" onclick="document.getElementById('tracker-file').click()" style="
                 border: 2px dashed var(--gray-200); border-radius: 10px;
                 padding: 24px; text-align: center; cursor: pointer;
                 background: var(--gray-50); transition: all 0.2s; margin-bottom: 12px;">
                 <div style="font-size: 28px; margin-bottom: 6px;">📡</div>
-                <div style="font-size: 13px; font-weight: 600; color: var(--navy);" id="tracker-drop-label">Drop tracker .xlsx file here</div>
+                <div style="font-size: 13px; font-weight: 600; color: var(--navy);" id="tracker-drop-label">Drop combined .xlsx file here</div>
                 <div style="font-size: 11px; color: var(--gray-400); margin-top: 3px;">or click to browse</div>
                 <input type="file" id="tracker-file" accept=".xlsx,.xls" style="display:none" onchange="handleTrackerFileSelect(event)" />
               </div>
@@ -508,34 +508,7 @@
               <div id="tracker-success" class="alert alert-green" style="display:none; margin-top:8px"></div>
 
               <button class="btn btn-primary" id="tracker-btn" onclick="processTracker()" disabled style="margin-top:12px;">
-                <span id="tracker-btn-text">Process Tracker File</span>
-              </button>
-            </div>
-
-            <div class="card mt-16">
-              <div class="card-title">Step 4 — Camera Files <span style="font-weight:400; text-transform:none; letter-spacing:0; color:var(--gray-400); font-size:11px;">(optional, runs independently)</span></div>
-              <p class="text-muted" style="margin: 8px 0 12px">Upload your weekly camera exports (trim + vulture). You can drop multiple files at once.</p>
-
-              <!-- Drop zone for camera xlsx files -->
-              <div id="camera-drop-zone" onclick="document.getElementById('camera-file').click()" style="
-                border: 2px dashed var(--gray-200); border-radius: 10px;
-                padding: 24px; text-align: center; cursor: pointer;
-                background: var(--gray-50); transition: all 0.2s; margin-bottom: 12px;">
-                <div style="font-size: 28px; margin-bottom: 6px;">📷</div>
-                <div style="font-size: 13px; font-weight: 600; color: var(--navy);" id="camera-drop-label">Drop camera .xlsx files here</div>
-                <div style="font-size: 11px; color: var(--gray-400); margin-top: 3px;">or click to browse — multi-select supported</div>
-                <input type="file" id="camera-file" accept=".xlsx,.xls" multiple style="display:none" onchange="handleCameraFileSelect(event)" />
-              </div>
-
-              <!-- List of loaded files -->
-              <div id="camera-file-list" style="display:none; margin-bottom:12px;"></div>
-
-              <div id="camera-info"    class="alert alert-navy"  style="display:none; margin-top:8px"></div>
-              <div id="camera-error"   class="alert alert-red"   style="display:none; margin-top:8px"></div>
-              <div id="camera-success" class="alert alert-green" style="display:none; margin-top:8px"></div>
-
-              <button class="btn btn-primary" id="camera-btn" onclick="processCamera()" disabled style="margin-top:12px;">
-                <span id="camera-btn-text">Process Camera Files</span>
+                <span id="tracker-btn-text">Process File</span>
               </button>
             </div>
           </div>
@@ -1959,7 +1932,12 @@ async function processTracker() {
     const arrayBuf = await trackerFile.arrayBuffer();
     const wb       = XLSX.read(arrayBuf, { type: 'array', cellDates: true });
     console.log('[Tracker] Workbook sheets:', wb.SheetNames);
-    const sheet    = wb.Sheets[wb.SheetNames[0]];
+    // Find the "Time Tracker" sheet by name (case-insensitive).
+    // The new combined file format has two sheets: "Time Tracker" and "Station Daily (DB)".
+    // Fall back to the first sheet for backward compatibility with old single-sheet files.
+    const trackerSheetName = wb.SheetNames.find(n => /time\s*tracker/i.test(n)) || wb.SheetNames[0];
+    const sheet    = wb.Sheets[trackerSheetName];
+    console.log('[Tracker] Using sheet:', trackerSheetName);
     // header: 1 = return as rows/arrays (no auto-detected headers)
     // defval: null = empty cells become null instead of being skipped
     const rows     = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: true });
@@ -1982,7 +1960,7 @@ async function processTracker() {
       errEl.textContent = 'No tracker data found in this file. Make sure it has the expected Name/Zone/Start/End layout.';
       errEl.style.display = 'flex';
       btn.disabled = false;
-      btnTxt.innerHTML = 'Process Tracker File';
+      btnTxt.innerHTML = 'Process File';
       return;
     }
 
@@ -2098,17 +2076,28 @@ async function processTracker() {
 
     // 8) Show summary
     const redFlags = insertRows.filter(r => r.status && r.status.includes('red')).length;
-    sucEl.innerHTML =
+    let summaryHtml =
       '✅ Tracker processed for ' + startDate + ' to ' + endDate + '<br>' +
       '&nbsp;&nbsp;• ' + matchedCount + ' shifts matched to Homebase<br>' +
       (noHBCount    > 0 ? '&nbsp;&nbsp;• ⚠️ ' + noHBCount    + ' tracker entries without a Homebase shift<br>' : '') +
       (skippedCount > 0 ? '&nbsp;&nbsp;• ⏭️ ' + skippedCount + ' tracker entries for unmapped workers (no Tracker ID in Staff)<br>' : '') +
-      (redFlags     > 0 ? '&nbsp;&nbsp;• 🔴 ' + redFlags     + ' red flags (late >30 min or left >30 min early)' : '');
+      (redFlags     > 0 ? '&nbsp;&nbsp;• 🔴 ' + redFlags     + ' red flags (late >30 min or left >30 min early)<br>' : '');
+
+    // ── ALSO process the Station Daily (DB) sheet if present ───────
+    // This is camera data — same xlsx, second sheet.
+    const camResult = await processStationDailyDBSheet(wb);
+    if (camResult.processed) {
+      summaryHtml += '<br>📷 Camera data: ' + camResult.summary;
+    } else if (camResult.error) {
+      summaryHtml += '<br>⚠️ Camera sheet not processed: ' + camResult.error;
+    }
+
+    sucEl.innerHTML = summaryHtml;
     sucEl.style.display = 'flex';
 
     // Reset the file picker so re-uploading works cleanly
     trackerFile = null;
-    document.getElementById('tracker-drop-label').textContent = 'Drop tracker .xlsx file here';
+    document.getElementById('tracker-drop-label').textContent = 'Drop combined .xlsx file here';
     document.getElementById('tracker-drop-zone').style.borderColor = 'var(--gray-200)';
     document.getElementById('tracker-drop-zone').style.background  = 'var(--gray-50)';
     document.getElementById('tracker-file').value = '';
@@ -2120,7 +2109,154 @@ async function processTracker() {
   }
 
   btn.disabled = false;
-  btnTxt.innerHTML = 'Process Tracker File';
+  btnTxt.innerHTML = 'Process File';
+}
+
+// ══════════════════════════════════════════════════════════════
+// STATION DAILY (DB) — new combined-file camera sheet parser
+// The new xlsx format has a "Station Daily (DB)" sheet with this layout:
+//   Row 1: header   [Station, Station Type, Date, Total Units, Pallets/Hr, ...]
+//   Row 2: 'Station: Bandsaw 1' summary row  (skip — no daily data)
+//   Row 3+: daily rows  [Bandsaw 1, vulture, 2026-06-15, 248, ...]
+//   blank row separator, then next station, etc.
+// We IGNORE the "Station Type" column (each station's type is already configured
+// in the stations table). Just match by station name.
+// Returns { processed: bool, summary: string, error?: string }
+// ══════════════════════════════════════════════════════════════
+async function processStationDailyDBSheet(workbook) {
+  // Find the camera sheet by name (case-insensitive)
+  const sheetName = workbook.SheetNames.find(n => /station\s*daily/i.test(n));
+  if (!sheetName) {
+    return { processed: false, error: 'No "Station Daily (DB)" sheet found' };
+  }
+
+  const sheet = workbook.Sheets[sheetName];
+  const rows  = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: true });
+  console.log('[Camera] Sheet:', sheetName, 'rows:', rows.length);
+
+  if (rows.length < 3) {
+    return { processed: false, error: 'Camera sheet is empty' };
+  }
+
+  // Walk rows: skip header (row 0), skip "Station: X" summary rows, parse daily rows
+  // A valid daily row: col 0 is the station name (string), col 2 is a single date string (yyyy-mm-dd or similar)
+  const parsed = [];   // { station_name, work_date, total_units, pallets_per_hr, first_pallet, last_pallet, uptime_pct, missort_count }
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i] || [];
+    const col0 = row[0];
+    const col2 = row[2];
+
+    if (col0 === null || col0 === undefined || col0 === '') continue;  // blank row
+    const stationCell = String(col0).trim();
+    if (stationCell.toLowerCase().startsWith('station:')) continue;     // summary row → skip
+
+    // Parse the date — could be a Date object, "2026-06-15", or "2026-06-15 to 2026-06-21"
+    if (!col2) continue;
+    let workDate;
+    if (col2 instanceof Date) {
+      workDate = toDateKeyLocal(col2);
+    } else {
+      const s = String(col2).trim();
+      // Skip range strings (e.g. "2026-06-15 to 2026-06-21") — those are summary rows
+      if (s.indexOf(' to ') !== -1) continue;
+      const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (m) {
+        workDate = m[1] + '-' + m[2] + '-' + m[3];
+      } else {
+        const d = new Date(s);
+        if (isNaN(d)) continue;
+        workDate = toDateKeyLocal(d);
+      }
+    }
+
+    parsed.push({
+      station_name:  stationCell,
+      work_date:     workDate,
+      total_units:   Number(row[3]) || 0,
+      pallets_per_hr: row[4] != null ? Number(row[4]) : null,
+      first_pallet:  row[5] != null ? String(row[5]).trim() : null,   // e.g. "07:11:42"
+      last_pallet:   row[6] != null ? String(row[6]).trim() : null,
+      uptime_pct:    row[7] != null ? Number(row[7]) : null,
+      missort_count: row[8] != null ? Number(row[8]) : null
+    });
+  }
+
+  console.log('[Camera] Parsed rows:', parsed.length);
+  if (parsed.length === 0) {
+    return { processed: false, error: 'No daily rows found in Station Daily (DB) sheet' };
+  }
+
+  // Load stations from DB so we can map station_name → station_id
+  const { data: stations, error: stErr } = await sb.from('stations').select('id, name');
+  if (stErr) return { processed: false, error: 'Could not load stations: ' + stErr.message };
+
+  const stationByName = {};
+  (stations || []).forEach(s => { stationByName[s.name] = s; });
+
+  // Map each parsed row to a station_id; collect unknowns
+  const insertRows = [];
+  const unknownStations = new Set();
+  parsed.forEach(p => {
+    const st = stationByName[p.station_name];
+    if (!st) {
+      unknownStations.add(p.station_name);
+      return;
+    }
+    insertRows.push({
+      station_id:     st.id,
+      work_date:      p.work_date,
+      total_units:    p.total_units,
+      pallets_per_hr: p.pallets_per_hr,
+      first_pallet:   combineDateAndTime(p.work_date, p.first_pallet),
+      last_pallet:    combineDateAndTime(p.work_date, p.last_pallet),
+      uptime_pct:     p.uptime_pct,
+      missort_count:  p.missort_count
+    });
+  });
+
+  if (insertRows.length === 0) {
+    let msg = 'No rows matched a known station.';
+    if (unknownStations.size > 0) msg += ' Unknown stations: ' + [...unknownStations].join(', ');
+    return { processed: false, error: msg };
+  }
+
+  // Log the upload + upsert into camera_daily
+  const allDates = insertRows.map(r => r.work_date).sort();
+  const period   = allDates[0] + ' to ' + allDates[allDates.length - 1];
+
+  const { data: uploadRow } = await sb.from('camera_uploads').insert({
+    period_label: period,
+    rows_parsed:  insertRows.length,
+    filename:     trackerFile ? trackerFile.name : '(combined file)'
+  }).select('id').single();
+
+  const withUpload = insertRows.map(r => ({ ...r, upload_id: uploadRow ? uploadRow.id : null }));
+  const { error: insErr } = await sb.from('camera_daily')
+    .upsert(withUpload, { onConflict: 'station_id,work_date' });
+  if (insErr) {
+    return { processed: false, error: 'Could not save camera data: ' + insErr.message };
+  }
+
+  // Build a friendly per-station summary
+  const byStation = {};
+  parsed.forEach(p => {
+    if (!stationByName[p.station_name]) return;   // already counted as unknown
+    if (!byStation[p.station_name]) byStation[p.station_name] = { days: 0, units: 0 };
+    byStation[p.station_name].days  += 1;
+    byStation[p.station_name].units += (p.total_units || 0);
+  });
+  const stationList = Object.keys(byStation).sort();
+  let summary = insertRows.length + ' daily rows saved for ' + period;
+  if (stationList.length > 0) {
+    summary += '<br>' + stationList.map(n =>
+      '&nbsp;&nbsp;&nbsp;&nbsp;• ' + n + ': ' + byStation[n].days + ' days, ' + byStation[n].units.toLocaleString() + ' units'
+    ).join('<br>');
+  }
+  if (unknownStations.size > 0) {
+    summary += '<br>&nbsp;&nbsp;&nbsp;&nbsp;⚠️ Ignored unknown stations (add them on Stations page first): ' + [...unknownStations].join(', ');
+  }
+
+  return { processed: true, summary: summary };
 }
 
 // ── PARSER: walks rows, returns { "tracker_name|yyyy-mm-dd": {...} } ────
