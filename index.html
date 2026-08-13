@@ -1234,6 +1234,32 @@ async function refreshWorkersCache() {
   }
   workersByName = {};
   (data || []).forEach(w => { workersByName[w.name] = w; });
+
+  // Load the alias map too — Google Form entries are free text, so names come
+  // in as 'Jeevan', 'jeevan', 'Jiwan' etc. and must be resolved to the exact
+  // workers.name before any rate or payout lookup happens.
+  const { data: aliasData } = await sb.from('worker_aliases').select('*');
+  workerAliases = {};
+  (aliasData || []).forEach(a => { workerAliases[clean(a.alias)] = a.worker_name; });
+}
+
+// Alias map: cleaned alias -> exact workers.name
+let workerAliases = {};
+
+// Resolve a raw, user-typed worker name to the canonical workers.name.
+// Order: exact match -> alias table -> case-insensitive match -> unchanged.
+// Returns the input untouched when nothing matches, so junk entries stay
+// visible as flags rather than silently vanishing.
+function resolveWorker(raw) {
+  const name = (raw || '').trim();
+  if (!name) return name;
+  if (workersByName[name]) return name;
+
+  const key = clean(name);
+  if (workerAliases[key]) return workerAliases[key];
+
+  const hit = Object.keys(workersByName).find(n => clean(n) === key);
+  return hit || name;
 }
 
 // ── INIT ────────────────────────────────────────────────────
@@ -2836,9 +2862,10 @@ async function runPayroll() {
 
       if (issue) flags.push({ ...sub, issue });
 
-      if (!pieceTotals[sub.worker_name]) pieceTotals[sub.worker_name] = { pay: 0, pieces: 0 };
-      pieceTotals[sub.worker_name].pay    += earnings;
-      pieceTotals[sub.worker_name].pieces += sub.qty;
+      const subWorker = resolveWorker(sub.worker_name);
+      if (!pieceTotals[subWorker]) pieceTotals[subWorker] = { pay: 0, pieces: 0 };
+      pieceTotals[subWorker].pay    += earnings;
+      pieceTotals[subWorker].pieces += sub.qty;
 
       // Update submission with rate + earnings
       sb.from('piece_submissions').update({ rate: rate || null, earnings: earnings, issue: issue })
@@ -2896,7 +2923,7 @@ async function runPayroll() {
           : 0;
         return {
           id:       b.id,
-          worker:   (b.worker_name || '').trim(),
+          worker:   resolveWorker(b.worker_name),
           date:     workDate,
           bol:      (b.bol_number || '').trim(),
           customer: (b.customer_name || '').trim(),
