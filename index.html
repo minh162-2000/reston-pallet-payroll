@@ -2985,20 +2985,47 @@ async function runPayroll() {
     const allWorkers = new Set([...Object.keys(workerTotals), ...Object.keys(pieceTotals)]);
     const summaryRows = [];
 
+    // Fixed-salary and manual-amount workers (Jagdeep, Minh, Victoria, Cleaning)
+    // have no hours and no pieces, so they never show up in the two maps above.
+    // Add them explicitly or they'd be missing from the payout lists entirely.
+    Object.values(workersByName).forEach(w => {
+      if (w.active && (w.payroll_track === 'fixed' || w.payroll_track === 'manual')) {
+        allWorkers.add(w.name);
+      }
+    });
+
     allWorkers.forEach(name => {
       const h = workerTotals[name]  || { netHrs: 0, pay: 0, lateDays: 0 };
       const p = pieceTotals[name]   || { pay: 0, pieces: 0 };
       const hasFlag = flags.some(f => f.worker_name === name);
+      const base    = h.pay + p.pay;
+
+      // BASE -> DEDUCT -> HAIRCUT gives GROSS, which calcPayout then splits
+      // across the payroll / premium / cheque channels. A worker who didn't
+      // work gets 0, not a negative from the deduction.
+      const w     = workersByName[name] || {};
+      const gross = base > 0
+        ? Math.max(0, r6((base + (w.deduction || 0)) * (w.haircut != null ? w.haircut : 1.0)))
+        : 0;
+      const payout = calcPayout(w, gross);
+
       summaryRows.push({
         week_id:      weekId,
         worker_name:  name,
         net_hrs:      Math.round(h.netHrs * 100) / 100,
         hourly_pay:   Math.round(h.pay    * 100) / 100,
         piece_pay:    Math.round(p.pay    * 100) / 100,
-        total_pay:    Math.round((h.pay + p.pay) * 100) / 100,
+        total_pay:    Math.round(base * 100) / 100,
         pieces_built: p.pieces,
         late_days:    h.lateDays,
-        has_flag:     hasFlag
+        has_flag:     hasFlag,
+        gross_pay:    Math.round(gross          * 100) / 100,
+        rt_payroll:   Math.round(payout.rt      * 100) / 100,
+        js_payroll:   Math.round(payout.js      * 100) / 100,
+        premium_paid: payout.premium_paid,
+        cheque_1:     Math.round(payout.cheque  * 100) / 100,
+        cheque_2:     Math.round(payout.cheque2 * 100) / 100,
+        total_comp:   Math.round(payout.total   * 100) / 100
       });
     });
 
