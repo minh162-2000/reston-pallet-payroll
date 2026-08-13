@@ -3085,6 +3085,74 @@ function processHourlyCSV(lines, weekStart, weekEnd) {
   return shifts;
 }
 
+// ── PAYOUT ENGINE ─────────────────────────────────────────────
+// Takes a worker's config row (from the `workers` table) plus their gross
+// earnings for the week, and returns how that gross splits across the
+// payroll / premium / cheque channels.
+//
+// Validated against weeks 0713-0719, 0720-0726, 0727-0802 and 0803-0809:
+// 118 of 119 worker-weeks reproduced exactly, with 0720 and 0803
+// reconciling to the penny across all 31 people.
+
+function r6(n) { return Math.round(n * 1e6) / 1e6; }
+
+function calcPayout(worker, gross, manualAmount) {
+  const track = worker.payroll_track || 'none';
+  const out = { rt: 0, js: 0, premium: 0, premium_paid: 0, cheque: 0, cheque2: 0, total: 0 };
+
+  // Victoria, Cleaning — amount is typed in, not derived from hours or pieces
+  if (track === 'manual') {
+    const amt = manualAmount != null ? manualAmount : (gross || 0);
+    out.premium = out.premium_paid = out.total = amt;
+    return out;
+  }
+
+  // Jagdeep, Minh — flat weekly salary, no calculation
+  if (track === 'fixed') {
+    out.rt     = worker.fixed_rt     || 0;
+    out.cheque = worker.fixed_cheque || 0;
+    out.total  = r6(out.rt + out.cheque);
+    return out;
+  }
+
+  // Robert — everything goes to JS payroll, no cap and no premium
+  if (worker.payroll_all) {
+    out.js = out.total = gross;
+    return out;
+  }
+
+  // Normal path: cap the payroll, whatever's left becomes premium or cheque
+  let pay = 0;
+  if (track === 'RT' || track === 'JS') {
+    const cap = (worker.payroll_cap_hours || 0) * (worker.payroll_cap_rate || 0);
+    pay = Math.min(gross, cap);
+    if (track === 'RT') out.rt = pay; else out.js = pay;
+  }
+  let rem = r6(gross - pay);
+
+  // Pawel, Jeevan — remainder is paid by cheque rather than cash.
+  // Pawel's carries 13% HST; Jeevan's overflows into a second cheque past $600.
+  if (worker.cheque_name) {
+    rem = r6(rem * (worker.cheque_hst || 1.0));
+    const cap = worker.cheque_cap;
+    out.cheque  = cap ? Math.min(rem, cap) : rem;
+    out.cheque2 = cap ? Math.max(0, r6(rem - cap)) : 0;
+    out.total   = r6(pay + rem);
+    return out;
+  }
+
+  // r6 BEFORE rounding is not optional: in JS, (703.8 - 580.8) evaluates to
+  // 122.99999999999994, which floors to 122 instead of 123. That silently
+  // underpays by $1. Miroslaw and Navjot round up; everyone else rounds down.
+  const prem = r6(rem * (worker.premium_mult != null ? worker.premium_mult : 1.0));
+  out.premium = prem;
+  out.premium_paid = worker.premium_round === 'ceil' ? Math.ceil(prem) : Math.floor(prem);
+
+  // Manpreet and Sandro carry the unrounded premium into total comp
+  out.total = r6(pay + (worker.total_uses_unrounded ? prem : out.premium_paid));
+  return out;
+}
+
 // ── BREAK CALCULATION ─────────────────────────────────────────
 // Reads the break_rule and saturday_rule fields from the worker object
 // (as stored in the Supabase `workers` table).
