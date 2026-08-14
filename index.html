@@ -339,6 +339,9 @@
       <div class="nav-item" onclick="nav('workers')">
         <span class="icon">👷</span> Hourly
       </div>
+      <div class="nav-item" onclick="nav('payouts')">
+        <span class="icon">💵</span> Payouts
+      </div>
     </div>
 
     <div class="nav-section">
@@ -618,6 +621,18 @@
               <tbody id="flags-table"></tbody>
             </table>
           </div>
+        </div>
+      </div>
+
+      <!-- ── PAYOUTS ── -->
+      <div id="page-payouts" class="page">
+        <div style="display:flex; align-items:center; gap:12px; margin-bottom:20px; flex-wrap:wrap;">
+          <label style="font-size:13px; font-weight:600;">Week</label>
+          <select id="payout-week-select" onchange="loadPayouts()" style="min-width:220px;"></select>
+          <button class="btn btn-outline btn-sm" onclick="window.print()">🖨️ Print</button>
+        </div>
+        <div id="payout-content">
+          <div style="padding:32px; text-align:center; color:var(--gray-400)">Select a week above</div>
         </div>
       </div>
 
@@ -1355,7 +1370,8 @@ function nav(page) {
     'build-pay': 'Build Pay',
     performance: 'Performance', staff: 'Staff',
     stations: 'Stations',
-    'print-slips': 'Print Slips'
+    'print-slips': 'Print Slips',
+    payouts: 'Payouts'
   };
   document.getElementById('page-title').textContent = titles[page] || page;
 
@@ -1366,6 +1382,7 @@ function nav(page) {
     )) item.classList.add('active');
   });
 
+  if (page === 'payouts')     initPayouts();
   if (page === 'history')     loadHistory();
   if (page === 'workers')     loadWorkersTab();
   if (page === 'submissions') loadSubmissions();
@@ -1375,6 +1392,163 @@ function nav(page) {
   if (page === 'staff')       loadStaff();
   if (page === 'stations')    loadStations();
   if (page === 'rates')       loadRates();
+}
+
+// ── PAYOUTS PAGE ─────────────────────────────────────────────
+// Renders the five sections that replace the side-by-side tables at the
+// bottom of each manual week sheet: RT payroll, JS payroll, premium cash,
+// cheques, and the pay-code subtotals.
+
+const PAY_CODE_LABELS = {
+  P:  'Piece rate',
+  M:  'Manager',
+  HC: 'Hourly — Cutting',
+  HS: 'Hourly — Stripping',
+  S:  'Salary / fixed',
+  D:  'Driver'
+};
+
+async function initPayouts() {
+  const sel = document.getElementById('payout-week-select');
+  if (sel.options.length === 0) {
+    const { data: weeks } = await sb.from('week_periods')
+      .select('*').order('week_start', { ascending: false });
+    (weeks || []).forEach(w => {
+      const o = document.createElement('option');
+      o.value = w.id;
+      o.textContent = fmtWeekLabel(w.week_start, w.week_end);
+      sel.appendChild(o);
+    });
+  }
+  loadPayouts();
+}
+
+function fmtWeekLabel(a, b) {
+  const f = d => { const x = new Date(d + 'T00:00:00');
+    return String(x.getMonth() + 1).padStart(2, '0') + '/' + String(x.getDate()).padStart(2, '0'); };
+  return f(a) + ' – ' + f(b);
+}
+
+const money = n => '$' + (Number(n) || 0).toLocaleString('en-CA',
+  { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+async function loadPayouts() {
+  const weekId = document.getElementById('payout-week-select').value;
+  const box    = document.getElementById('payout-content');
+  if (!weekId) { box.innerHTML = '<div style="padding:32px;text-align:center;color:var(--gray-400)">No weeks yet</div>'; return; }
+
+  box.innerHTML = '<div style="padding:32px;text-align:center;color:var(--gray-400)">Loading…</div>';
+
+  const { data: rows } = await sb.from('worker_week_summary')
+    .select('*').eq('week_id', weekId).order('worker_name');
+  if (!rows || !rows.length) {
+    box.innerHTML = '<div style="padding:32px;text-align:center;color:var(--gray-400)">No payroll run for this week yet</div>';
+    return;
+  }
+
+  // Attach each worker's config so we can show pay code and cheque name
+  const cfg = {};
+  (await sb.from('workers').select('*')).data.forEach(w => cfg[w.name] = w);
+  rows.forEach(r => r._w = cfg[r.worker_name] || {});
+
+  const rt      = rows.filter(r => (r.rt_payroll   || 0) > 0);
+  const js      = rows.filter(r => (r.js_payroll   || 0) > 0);
+  const premium = rows.filter(r => (r.premium_paid || 0) > 0);
+  const cheques = rows.filter(r => (r.cheque_1 || 0) > 0 || (r.cheque_2 || 0) > 0);
+  const unpaid  = rows.filter(r => (r.total_comp || 0) === 0 && (r.total_pay || 0) > 0);
+
+  const sum = (arr, f) => arr.reduce((t, r) => t + (Number(f(r)) || 0), 0);
+
+  // Pay-code subtotals — the P / M / HC / HS / S / D blocks
+  const codes = {};
+  rows.forEach(r => {
+    const c = r._w.pay_code; if (!c) return;
+    codes[c] = (codes[c] || 0) + (Number(r.total_comp) || 0);
+  });
+
+  // Bill denominations for the cash run
+  const premTotal = sum(premium, r => r.premium_paid);
+  const bills = {}; let rem = Math.round(premTotal);
+  [100, 50, 20, 10, 5, 2, 1].forEach(d => { bills[d] = Math.floor(rem / d); rem -= bills[d] * d; });
+
+  const tbl = (title, colour, cols, body, foot) => `
+    <div class="section-header" style="margin-top:28px;">
+      <h3 style="color:${colour}">${title}</h3>
+    </div>
+    <div class="table-wrap"><table style="font-size:13px;">
+      <thead><tr>${cols.map(c => `<th>${c}</th>`).join('')}</tr></thead>
+      <tbody>${body}</tbody>
+      ${foot ? `<tfoot><tr style="font-weight:700;background:var(--gray-50)">${foot}</tr></tfoot>` : ''}
+    </table></div>`;
+
+  let html = `
+    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:8px;">
+      ${[['RT Payroll', sum(rt, r => r.rt_payroll), '#1F3864'],
+         ['JS Payroll', sum(js, r => r.js_payroll), '#2E5C8A'],
+         ['Premium Cash', premTotal, '#B45309'],
+         ['Cheques', sum(cheques, r => (r.cheque_1||0)+(r.cheque_2||0)), '#7C3AED'],
+         ['Total Comp', sum(rows, r => r.total_comp), '#166534']]
+      .map(([l, v, c]) => `
+        <div style="flex:1;min-width:150px;padding:14px 16px;border-radius:8px;background:#fff;border:1px solid var(--gray-200);border-left:4px solid ${c}">
+          <div style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--gray-400);font-weight:600">${l}</div>
+          <div style="font-size:20px;font-weight:700;margin-top:4px;color:${c}">${money(v)}</div>
+        </div>`).join('')}
+    </div>`;
+
+  html += tbl('RT Payroll — Reston', '#1F3864',
+    ['Name', 'Code', 'Cap Hrs', 'Rate', 'Amount'],
+    rt.map(r => `<tr><td>${r.worker_name}</td><td>${r._w.pay_code || ''}</td>
+      <td>${r._w.payroll_cap_hours ?? ''}</td><td>${r._w.payroll_cap_rate ? money(r._w.payroll_cap_rate) : ''}</td>
+      <td style="text-align:right">${money(r.rt_payroll)}</td></tr>`).join(''),
+    `<td colspan="4">Total — ${rt.length} people</td><td style="text-align:right">${money(sum(rt, r => r.rt_payroll))}</td>`);
+
+  html += tbl('JS Payroll — Just Skid', '#2E5C8A',
+    ['Name', 'Code', 'Cap Hrs', 'Rate', 'Amount'],
+    js.map(r => `<tr><td>${r.worker_name}</td><td>${r._w.pay_code || ''}</td>
+      <td>${r._w.payroll_cap_hours ?? ''}</td><td>${r._w.payroll_cap_rate ? money(r._w.payroll_cap_rate) : ''}</td>
+      <td style="text-align:right">${money(r.js_payroll)}</td></tr>`).join(''),
+    `<td colspan="4">Total — ${js.length} people</td><td style="text-align:right">${money(sum(js, r => r.js_payroll))}</td>`);
+
+  html += tbl('Premium — Cash', '#B45309',
+    ['Name', 'Code', 'Gross', 'Payroll', 'Cash'],
+    premium.map(r => `<tr><td>${r.worker_name}</td><td>${r._w.pay_code || ''}</td>
+      <td style="text-align:right;color:var(--gray-400)">${money(r.gross_pay)}</td>
+      <td style="text-align:right;color:var(--gray-400)">${money((r.rt_payroll||0)+(r.js_payroll||0))}</td>
+      <td style="text-align:right;font-weight:600">${money(r.premium_paid)}</td></tr>`).join(''),
+    `<td colspan="4">Total — ${premium.length} people</td><td style="text-align:right">${money(premTotal)}</td>`);
+
+  html += `<div class="table-wrap" style="margin-top:12px;"><table style="font-size:13px;">
+    <thead><tr><th>Bill</th>${[100,50,20,10,5,2,1].map(d => `<th style="text-align:center">$${d}</th>`).join('')}</tr></thead>
+    <tbody><tr><td style="font-weight:600">Count</td>
+      ${[100,50,20,10,5,2,1].map(d => `<td style="text-align:center;font-weight:700">${bills[d]}</td>`).join('')}
+    </tr></tbody></table></div>`;
+
+  if (cheques.length) {
+    html += tbl('Cheques', '#7C3AED',
+      ['Name', 'Cheque To', 'Cheque 1', 'Cheque 2', 'Total'],
+      cheques.map(r => `<tr><td>${r.worker_name}</td><td>${r._w.cheque_name || '—'}</td>
+        <td style="text-align:right">${money(r.cheque_1)}</td>
+        <td style="text-align:right">${r.cheque_2 ? money(r.cheque_2) : '—'}</td>
+        <td style="text-align:right;font-weight:600">${money((r.cheque_1||0)+(r.cheque_2||0))}</td></tr>`).join(''),
+      `<td colspan="4">Total</td><td style="text-align:right">${money(sum(cheques, r => (r.cheque_1||0)+(r.cheque_2||0)))}</td>`);
+  }
+
+  html += tbl('Subtotals by Pay Code', '#166534',
+    ['Code', 'Meaning', 'Amount'],
+    Object.keys(codes).sort().map(c => `<tr><td style="font-weight:700">${c}</td>
+      <td>${PAY_CODE_LABELS[c] || ''}</td>
+      <td style="text-align:right">${money(codes[c])}</td></tr>`).join(''),
+    `<td colspan="2">Grand total</td><td style="text-align:right">${money(sum(rows, r => r.total_comp))}</td>`);
+
+  if (unpaid.length) {
+    html += tbl('⚠️ Earned but not paid — no config', 'var(--red)',
+      ['Name', 'Earnings', 'Reason'],
+      unpaid.map(r => `<tr><td>${r.worker_name}</td>
+        <td style="text-align:right">${money(r.total_pay)}</td>
+        <td>Name not matched to a configured worker</td></tr>`).join(''), null);
+  }
+
+  box.innerHTML = html;
 }
 
 // ── DASHBOARD ────────────────────────────────────────────────
@@ -2833,6 +3007,7 @@ async function runPayroll() {
 
     // Calculate piece rate earnings + validate BOL
     const pieceTotals = {}; // name -> { pay, pieces }
+    const pieceWrites = [];
     const bolMap      = {}; // bol|size -> { bolQty, entries }
     const flags       = [];
 
@@ -2867,10 +3042,14 @@ async function runPayroll() {
       pieceTotals[subWorker].pay    += earnings;
       pieceTotals[subWorker].pieces += sub.qty;
 
-      // Update submission with rate + earnings
-      sb.from('piece_submissions').update({ rate: rate || null, earnings: earnings, issue: issue })
-        .eq('id', sub.id);
+      // Same fire-and-forget problem as build_submissions — collect and flush
+      pieceWrites.push({ id: sub.id, rate: rate || null, earnings: earnings, issue: issue });
     });
+
+    for (let i = 0; i < pieceWrites.length; i += 100) {
+      const { error: pwErr } = await sb.from('piece_submissions').upsert(pieceWrites.slice(i, i + 100));
+      if (pwErr) console.error('Piece write-back failed:', pwErr);
+    }
 
     // Create or update week period
     const weekTag = 'Week ' + detectedWeekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
@@ -2912,6 +3091,8 @@ async function runPayroll() {
       .select('*')
       .gte('build_date', weekStartStr)
       .lte('build_date', weekEndStr);
+
+    const buildWrites = [];
 
     if (buildSubs && buildSubs.length > 0) {
       // Normalize each row into the shape our flag/rate logic expects
@@ -2997,15 +3178,25 @@ async function runPayroll() {
           pieceTotals[e.worker].pieces += e.qty;
         }
 
-        // Write back: tag with week_id, save the calculated rate, earnings, and any issue
-        sb.from('build_submissions').update({
+        // Collect the write-back instead of firing it. These used to run
+        // un-awaited, so runPayroll() finished while ~190 requests were still
+        // in flight and most never landed — every earnings value stayed 0.
+        buildWrites.push({
+          id:         e.id,
           week_id:    weekId,
           rate:       e.rate,
           earnings:   Math.round(earnings * 100) / 100,
           has_issue:  !!e.issue,
           issue_note: e.issue || null
-        }).eq('id', e.id);
+        });
       });
+
+      // Flush in chunks of 100 and wait for them to finish
+      for (let i = 0; i < buildWrites.length; i += 100) {
+        const chunk = buildWrites.slice(i, i + 100);
+        const { error: bwErr } = await sb.from('build_submissions').upsert(chunk);
+        if (bwErr) console.error('Build write-back failed:', bwErr);
+      }
     }
 
     // Build worker week summary
@@ -3030,7 +3221,25 @@ async function runPayroll() {
       // BASE -> DEDUCT -> HAIRCUT gives GROSS, which calcPayout then splits
       // across the payroll / premium / cheque channels. A worker who didn't
       // work gets 0, not a negative from the deduction.
-      const w     = workersByName[name] || {};
+      const w = workersByName[name];
+
+      // No config row means the name never resolved to a real worker (form
+      // typo, junk entry). Record the earnings so it stays visible, but pay
+      // nothing — an empty config would dump the whole amount into premium.
+      if (!w || !w.pay_code) {
+        summaryRows.push({
+          week_id: weekId, worker_name: name,
+          net_hrs:  Math.round(h.netHrs * 100) / 100,
+          hourly_pay: Math.round(h.pay * 100) / 100,
+          piece_pay:  Math.round(p.pay * 100) / 100,
+          total_pay:  Math.round(base * 100) / 100,
+          pieces_built: p.pieces, late_days: h.lateDays, has_flag: true,
+          gross_pay: 0, rt_payroll: 0, js_payroll: 0,
+          premium_paid: 0, cheque_1: 0, cheque_2: 0, total_comp: 0
+        });
+        return;
+      }
+
       const gross = base > 0
         ? Math.max(0, r6((base + (w.deduction || 0)) * (w.haircut != null ? w.haircut : 1.0)))
         : 0;
