@@ -1486,7 +1486,7 @@ async function loadPayouts() {
       ${[['RT Payroll', sum(rt, r => r.rt_payroll), '#1F3864'],
          ['JS Payroll', sum(js, r => r.js_payroll), '#2E5C8A'],
          ['Premium Cash', premTotal, '#B45309'],
-         ['Cheques', sum(cheques, r => (r.cheque_1||0)+(r.cheque_2||0)), '#7C3AED'],
+         ['Cheques', sum(cheques, r => (r._w.cheque_mode === 'payroll_plus' ? 0 : (r.cheque_1||0)) + (r.cheque_2||0)), '#7C3AED'],
          ['Total Comp', sum(rows, r => r.total_comp), '#166534']]
       .map(([l, v, c]) => `
         <div style="flex:1;min-width:150px;padding:14px 16px;border-radius:8px;background:#fff;border:1px solid var(--gray-200);border-left:4px solid ${c}">
@@ -1525,12 +1525,18 @@ async function loadPayouts() {
 
   if (cheques.length) {
     html += tbl('Cheques', '#7C3AED',
-      ['Name', 'Cheque To', 'Cheque 1', 'Cheque 2', 'Total'],
-      cheques.map(r => `<tr><td>${r.worker_name}</td><td>${r._w.cheque_name || '—'}</td>
+      ['Worker', 'Cheque 1 — payable to', 'Amount', 'Cheque 2 — payable to', 'Amount'],
+      cheques.map(r => {
+        const inPayroll = r._w.cheque_mode === 'payroll_plus';
+        return `<tr><td>${r.worker_name}</td>
+        <td>${r._w.cheque_1_name || r._w.cheque_name || '—'}${inPayroll
+            ? ' <span style="font-size:11px;color:var(--gray-400)">(= RT payroll)</span>' : ''}</td>
         <td style="text-align:right">${money(r.cheque_1)}</td>
-        <td style="text-align:right">${r.cheque_2 ? money(r.cheque_2) : '—'}</td>
-        <td style="text-align:right;font-weight:600">${money((r.cheque_1||0)+(r.cheque_2||0))}</td></tr>`).join(''),
-      `<td colspan="4">Total</td><td style="text-align:right">${money(sum(cheques, r => (r.cheque_1||0)+(r.cheque_2||0)))}</td>`);
+        <td>${r.cheque_2 ? (r._w.cheque_2_name || '—') : '—'}</td>
+        <td style="text-align:right">${r.cheque_2 ? money(r.cheque_2) : '—'}</td></tr>`;
+      }).join(''),
+      `<td colspan="4">Total to write in cheques</td><td style="text-align:right">${
+        money(sum(cheques, r => (r.cheque_1||0)+(r.cheque_2||0)))}</td>`);
   }
 
   html += tbl('Subtotals by Pay Code', '#166534',
@@ -3393,9 +3399,23 @@ function calcPayout(worker, gross, manualAmount) {
   }
   let rem = r6(gross - pay);
 
-  // Pawel, Jeevan — remainder is paid by cheque rather than cash.
-  // Pawel's carries 13% HST; Jeevan's overflows into a second cheque past $600.
-  if (worker.cheque_name) {
+  // Two cheque modes:
+  //
+  //  'payroll_plus' (Pawel) — the RT payroll itself is issued as cheque 1 in
+  //     his own name, and the remainder becomes cheque 2 to Polservice with
+  //     13% HST. Cheque 1 and rt_payroll are the SAME money, not additive.
+  //
+  //  'extra' (Jeevan) — cheques are paid on top of the RT payroll. Cheque 1
+  //     caps at $600 and everything above it overflows into cheque 2.
+  //
+  if (worker.cheque_mode === 'payroll_plus') {
+    out.cheque  = pay;
+    out.cheque2 = r6(rem * (worker.cheque_hst || 1.0));
+    out.total   = r6(pay + out.cheque2);
+    return out;
+  }
+
+  if (worker.cheque_mode === 'extra' || worker.cheque_name) {
     rem = r6(rem * (worker.cheque_hst || 1.0));
     const cap = worker.cheque_cap;
     out.cheque  = cap ? Math.min(rem, cap) : rem;
